@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package chat;
+
+option go_package = "chat-gateway/proto/chat";
+
+// 聊天室服務
+service ChatRoomService {
+  // 創建聊天室
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  
+  // 加入聊天室
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  
+  // 離開聊天室
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  
+  // 獲取聊天室信息
+  rpc GetRoomInfo(GetRoomInfoRequest) returns (GetRoomInfoResponse);
+  
+  // 列出用戶的聊天室
+  rpc ListUserRooms(ListUserRoomsRequest) returns (ListUserRoomsResponse);
+  
+  // 發送消息
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  
+  // 獲取消息
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+  
+  // 流式獲取消息
+  rpc StreamMessages(StreamMessagesRequest) returns (stream ChatMessage);
+  
+  // 標記為已讀
+  rpc MarkAsRead(MarkAsReadRequest) returns (MarkAsReadResponse);
+  
+  // 獲取未讀數量
+  rpc GetUnreadCount(GetUnreadCountRequest) returns (GetUnreadCountResponse);
+}
+
+// 聊天室
+message ChatRoom {
+  string id = 1;
+  string name = 2;
+  string type = 3; // direct, group
+  string owner_id = 4;
+  repeated RoomMember members = 5;
+  RoomSettings settings = 6;
+  int64 created_at = 7;
+  int64 updated_at = 8;
+  int64 last_message_at = 9;
+  string last_message = 10;
+  int64 last_message_time = 11;
+}
+
+// 聊天室成員
+message RoomMember {
+  string user_id = 1;
+  string username = 2;
+  string display_name = 3;
+  string role = 4; // admin, member
+  int64 joined_at = 5;
+  int64 last_seen = 6;
+  int64 last_read_at = 7;
+}
+
+// 聊天室設置
+message RoomSettings {
+  bool allow_invite = 1;
+  bool allow_edit_messages = 2;
+  bool allow_delete_messages = 3;
+  bool allow_pin_messages = 4;
+  int32 max_members = 5;
+  string welcome_message = 6;
+}
+
+// 聊天消息
+message ChatMessage {
+  string id = 1;
+  string room_id = 2;
+  string sender_id = 3;
+  string content = 4;
+  string type = 5; // text, image, file, etc.
+  MessageMetadata metadata = 6;
+  int64 created_at = 7;
+  int64 updated_at = 8;
+  repeated string read_by = 9;
+  repeated string delivered_to = 10;
+}
+
+// 消息元數據
+message MessageMetadata {
+  string file_name = 1;
+  string file_size = 2;
+  string file_type = 3;
+  string file_url = 4;
+  string image_url = 5;
+  string image_thumbnail = 6;
+  int32 image_width = 7;
+  int32 image_height = 8;
+  double latitude = 9;
+  double longitude = 10;
+  string location_name = 11;
+}
+
+// 請求和響應消息
+message CreateRoomRequest {
+  string name = 1;
+  string type = 2;
+  string owner_id = 3;
+  repeated string member_ids = 4;
+  RoomSettings settings = 5;
+}
+
+message CreateRoomResponse {
+  bool success = 1;
+  string message = 2;
+  ChatRoom room = 3;
+}
+
+message JoinRoomRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message JoinRoomResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message LeaveRoomRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message LeaveRoomResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetRoomInfoRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message GetRoomInfoResponse {
+  bool success = 1;
+  string message = 2;
+  ChatRoom room = 3;
+}
+
+message ListUserRoomsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  string cursor = 3;  // 改用 cursor 分頁，而非 offset
+}
+
+message ListUserRoomsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ChatRoom rooms = 3;
+  string cursor = 4;   // 下一頁的 cursor
+  bool has_more = 5;   // 是否還有更多數據
+}
+
+message SendMessageRequest {
+  string room_id = 1;
+  string sender_id = 2;
+  string content = 3;
+  string type = 4;
+  MessageMetadata metadata = 5;
+}
+
+message SendMessageResponse {
+  bool success = 1;
+  string message = 2;
+  ChatMessage chat_message = 3;
+}
+
+message GetMessagesRequest {
+  string room_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  int64 since = 5;
+  int64 until = 6;
+}
+
+message GetMessagesResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ChatMessage messages = 3;
+  string next_cursor = 4;
+  bool has_more = 5;
+}
+
+message StreamMessagesRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message MarkAsReadRequest {
+  string room_id = 1;
+  string user_id = 2;
+  string message_id = 3;
+}
+
+message MarkAsReadResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetUnreadCountRequest {
+  string user_id = 1;
+  string room_id = 2; // optional
+}
+
+message GetUnreadCountResponse {
+  bool success = 1;
+  string message = 2;
+  int32 count = 3;
+}

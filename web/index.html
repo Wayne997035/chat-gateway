@@ -1,0 +1,1988 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>聊天室測試介面</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 1200px;
+            height: 80vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-info {
+            padding: 20px;
+            background: #007bff;
+            color: white;
+            text-align: center;
+        }
+
+        .user-info h3 {
+            margin-bottom: 10px;
+        }
+
+        .user-select {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+        }
+
+        .user-select option {
+            color: #333;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .contacts-section, .rooms-section {
+            margin-bottom: 15px;
+        }
+
+        .contacts-section h4, .rooms-section h4 {
+            margin: 0 0 10px 0;
+            padding: 0 10px;
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .contacts-list {
+            margin-bottom: 10px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 8px;
+            margin: 2px 10px;
+        }
+
+        .contact-item:hover {
+            background: #e3f2fd;
+            transform: translateX(2px);
+        }
+
+        .contact-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            margin-right: 12px;
+        }
+
+        .contact-info {
+            flex: 1;
+        }
+
+        .contact-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 2px;
+        }
+
+        .contact-status {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .contact-status:before {
+            content: "●";
+            color: #4caf50;
+            margin-right: 4px;
+        }
+
+        .contact-item:hover .contact-status:before {
+            color: #2e7d32;
+        }
+
+        .room-list {
+            padding: 0 10px;
+        }
+
+        .room-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .room-item:hover {
+            background: #f5f5f5;
+        }
+
+        .room-item.active {
+            background: #e3f2fd;
+            border-color: #007bff;
+        }
+
+        .room-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-right: 12px;
+        }
+
+        .room-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .room-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .room-name {
+            font-weight: bold;
+            font-size: 15px;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .room-time {
+            font-size: 11px;
+            color: #999;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        .room-preview {
+            font-size: 13px;
+            color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .unread-badge {
+            background: #ff3b30;
+            color: white;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            min-width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .room-type {
+            font-size: 12px;
+            color: #666;
+            background: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 10px;
+            display: inline-block;
+        }
+
+        .room-type.direct {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .room-type.group {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .create-room {
+            padding: 15px;
+            margin-top: 10px;
+        }
+
+        .create-room-btn {
+            width: 100%;
+            padding: 10px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .create-room-btn:hover {
+            background: #218838;
+        }
+
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-title {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .chat-type {
+            font-size: 12px;
+            color: #666;
+            background: #e9ecef;
+            padding: 4px 12px;
+            border-radius: 15px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin: 10px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            max-width: 70%;
+            position: relative;
+        }
+
+        .message.own {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+        
+        .message.other {
+            margin-right: auto;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #007bff;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .message.own .message-avatar {
+            background: #28a745;
+        }
+
+        .message.other .message-avatar {
+            background: #6c757d;
+        }
+
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            position: relative;
+            margin-bottom: 0;
+        }
+
+        .message.own .message-content {
+            background: #007bff;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.other .message-content {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .message-info {
+            font-size: 10px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .message.own .message-info {
+            text-align: right;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        
+        .message.other .message-info {
+            color: #666;
+            font-size: 11px;
+        }
+        
+        .read-status {
+            white-space: nowrap;
+        }
+
+        .message-input {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .message-input input:focus {
+            border-color: #007bff;
+        }
+
+        .send-btn {
+            padding: 12px 24px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .send-btn:hover {
+            background: #0056b3;
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .status {
+            padding: 10px 20px;
+            background: #e9ecef;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .modal h3 {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            height: 80px;
+            resize: vertical;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        /* 系統消息樣式 */
+        .message.system {
+            justify-content: center;
+            margin: 15px 0;
+        }
+
+        .message.system .message-content {
+            background: #f0f0f0;
+            color: #666;
+            font-size: 12px;
+            padding: 5px 15px;
+            border-radius: 12px;
+            text-align: center;
+            max-width: 80%;
+        }
+
+        /* 成員側邊欄 */
+        .members-sidebar {
+            width: 250px;
+            background: white;
+            border-left: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .members-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .members-header h4 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .btn-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+        }
+
+        .btn-close:hover {
+            color: #333;
+        }
+
+        .members-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .member-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+
+        .member-item:hover {
+            background: #f5f5f5;
+        }
+
+        .member-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .member-info {
+            flex: 1;
+        }
+
+        .member-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .member-role {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- 側邊欄 -->
+        <div class="sidebar">
+            <div class="user-info">
+                <h3>聊天室測試</h3>
+                <select class="user-select" id="userSelect">
+                    <option value="user_alice">Alice</option>
+                    <option value="user_bob">Bob</option>
+                    <option value="user_charlie">Charlie</option>
+                    <option value="user_david">David</option>
+                </select>
+            </div>
+            
+            <div class="sidebar-content">
+                <!-- 聯絡人列表 -->
+                <div class="contacts-section">
+                    <h4>聯絡人</h4>
+                    <div class="contacts-list" id="contactsList">
+                        <div class="contact-item" onclick="startChatWith('user_alice')">
+                            <div class="contact-avatar">A</div>
+                            <div class="contact-info">
+                                <div class="contact-name">Alice</div>
+                                <div class="contact-status">在線</div>
+                            </div>
+                        </div>
+                        <div class="contact-item" onclick="startChatWith('user_bob')">
+                            <div class="contact-avatar">B</div>
+                            <div class="contact-info">
+                                <div class="contact-name">Bob</div>
+                                <div class="contact-status">在線</div>
+                            </div>
+                        </div>
+                        <div class="contact-item" onclick="startChatWith('user_charlie')">
+                            <div class="contact-avatar">C</div>
+                            <div class="contact-info">
+                                <div class="contact-name">Charlie</div>
+                                <div class="contact-status">離線</div>
+                            </div>
+                        </div>
+                        <div class="contact-item" onclick="startChatWith('user_david')">
+                            <div class="contact-avatar">D</div>
+                            <div class="contact-info">
+                                <div class="contact-name">David</div>
+                                <div class="contact-status">在線</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 聊天室列表 -->
+                <div class="rooms-section">
+                    <h4>聊天室</h4>
+                    <div class="room-list" id="roomList">
+                        <div class="loading">載入聊天室中...</div>
+                    </div>
+                </div>
+                
+                <div class="create-room">
+                    <button class="create-room-btn" onclick="showCreateRoomModal()">
+                        + 創建群組
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 聊天區域 -->
+        <div class="chat-area">
+            <div class="chat-header">
+                <div>
+                    <div class="chat-title" id="chatTitle">選擇聊天室</div>
+                    <div class="chat-type" id="chatType"></div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-secondary" id="showMembersBtn" style="display: none;" onclick="toggleMemberList()">👥 成員</button>
+                    <button class="btn btn-secondary" id="roomSettingsBtn" style="display: none;" onclick="showRoomSettings()">設置</button>
+                </div>
+            </div>
+            
+            <div style="display: flex; flex: 1; overflow: hidden;">
+                <div class="messages" id="messages" style="flex: 1;">
+                    <div style="text-align: center; color: #999; padding: 80px 50px; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+                        <div style="font-size: 64px;">💬</div>
+                        <div style="font-size: 18px; color: #666;">選擇聊天室開始對話</div>
+                        <div style="font-size: 14px; color: #999;">從左側聊天室列表選擇，或點擊聯絡人開始新對話</div>
+                    </div>
+                </div>
+                
+                <!-- 成員列表側邊欄 -->
+                <div class="members-sidebar" id="membersSidebar" style="display: none;">
+                    <div class="members-header">
+                        <h4>群組成員</h4>
+                        <button class="btn-close" onclick="toggleMemberList()">✕</button>
+                    </div>
+                    <div class="members-list" id="membersSidebarList">
+                        <!-- 成員列表將動態填充 -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="message-input">
+                <input type="text" id="messageInput" placeholder="輸入消息..." disabled>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>發送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 群組設置模態框 -->
+    <div class="modal" id="roomSettingsModal">
+        <div class="modal-content">
+            <h3>群組設置</h3>
+            <div style="margin-bottom: 20px;">
+                <h4 style="margin-bottom: 10px;">群組成員</h4>
+                <div id="roomMembersList" style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+                    <!-- 成員列表將在這裡動態生成 -->
+                </div>
+                
+                <h4 style="margin-bottom: 10px;">添加成員</h4>
+                <div style="display: flex; gap: 10px;">
+                    <select id="addMemberSelect" style="flex: 1; padding: 8px; border-radius: 5px; border: 1px solid #ddd;">
+                        <option value="">選擇要添加的成員</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="addMember()">添加</button>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn btn-danger" onclick="leaveRoom()">退出群組</button>
+                <button type="button" class="btn btn-secondary" onclick="hideRoomSettings()">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 創建聊天室模態框 -->
+    <div class="modal" id="createRoomModal">
+        <div class="modal-content">
+            <h3>創建群組</h3>
+            <form id="createRoomForm">
+                <div class="form-group">
+                    <label for="roomName">群組名稱</label>
+                    <input type="text" id="roomName" required>
+                </div>
+                
+                <div class="form-group" id="membersGroup">
+                    <label for="roomMembers">選擇成員 (至少1人)</label>
+                    <select id="roomMembers" multiple size="4">
+                        <option value="user_alice">Alice</option>
+                        <option value="user_bob">Bob</option>
+                        <option value="user_charlie">Charlie</option>
+                        <option value="user_david">David</option>
+                    </select>
+                    <small style="color: #666; margin-top: 5px; display: block;">按住 Ctrl (Windows) 或 Cmd (Mac) 可選擇多個</small>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="hideCreateRoomModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">創建群組</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // 全局變量
+        let currentUser = 'user_alice';
+        let currentRoom = null;
+        let rooms = [];
+        let websocket = null;
+        let messageHistory = {};
+        let contacts = [
+            { id: 'user_alice', name: 'Alice', status: 'online' },
+            { id: 'user_bob', name: 'Bob', status: 'online' },
+            { id: 'user_charlie', name: 'Charlie', status: 'offline' },
+            { id: 'user_david', name: 'David', status: 'online' }
+        ];
+
+        // API 基礎 URL
+        const API_BASE = 'http://localhost:8080/api/v1';
+        const WS_BASE = 'ws://localhost:8080/ws';
+
+        // 防止重複初始化
+        let isInitialized = false;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!isInitialized) {
+                initializeApp();
+                isInitialized = true;
+            }
+        });
+
+        // 初始化應用
+        function initializeApp() {
+            
+            // 設置用戶選擇事件
+            document.getElementById('userSelect').addEventListener('change', function() {
+                currentUser = this.value;
+                console.log('切換用戶:', currentUser);
+                
+                // 清空當前狀態
+                currentRoom = null;
+                rooms = [];
+                messageHistory = {};
+                
+                // 重置 UI
+                document.getElementById('chatTitle').textContent = '選擇聊天室';
+                document.getElementById('chatType').textContent = '';
+                document.getElementById('messages').innerHTML = '<div style="text-align: center; color: #999; padding: 80px 50px; display: flex; flex-direction: column; align-items: center; gap: 20px;"><div style="font-size: 64px;">💬</div><div style="font-size: 18px; color: #666;">選擇聊天室開始對話</div><div style="font-size: 14px; color: #999;">從左側聊天室列表選擇，或點擊聯絡人開始新對話</div></div>';
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                document.getElementById('roomSettingsBtn').style.display = 'none';
+                
+                // 重新載入數據
+                loadRooms();
+                renderContacts();
+            });
+
+            // 設置表單提交事件
+            document.getElementById('createRoomForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createRoom();
+            });
+
+            // 設置消息輸入事件
+            document.getElementById('messageInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+
+
+            // 載入聊天室
+            loadRooms();
+            
+            // 渲染聯絡人列表
+            renderContacts();
+            
+            // 設置聊天室列表滾動監聽
+            setupRoomListScroll();
+            
+            // 設置訊息容器滾動監聽
+            setupMessagesScroll();
+            
+            // 定期刷新聊天室列表（每30秒），以便接收新的聊天室邀請
+            setInterval(() => {
+                loadRooms();
+            }, 30000); // 30秒刷新一次
+        }
+
+        // 將 user_id 轉換為顯示名稱
+        function getDisplayName(userId) {
+            const user = contacts.find(c => c.id === userId);
+            return user ? user.name : userId.replace('user_', '');
+        }
+
+        // 獲取聊天室顯示名稱
+        function getRoomDisplayName(room) {
+            if (room.type === 'group') {
+                return room.name; // 群組直接顯示群組名稱
+            } else if (room.type === 'direct' && room.members) {
+                // 私聊：找到除了當前用戶外的其他成員
+                const otherMember = room.members.find(member => member.user_id !== currentUser);
+                if (otherMember) {
+                    return getDisplayName(otherMember.user_id);
+                }
+            }
+            return room.name; // 備用：直接顯示房間名稱
+        }
+
+        // 格式化訊息時間（用於聊天室列表）
+        function formatMessageTime(timestamp) {
+            if (!timestamp) return '';
+            
+            const date = new Date(timestamp * 1000); // Unix timestamp 轉換
+            const now = new Date();
+            const diff = now - date;
+            
+            // 今天：只顯示時間
+            if (diff < 24 * 60 * 60 * 1000 && now.getDate() === date.getDate()) {
+                return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+            }
+            
+            // 昨天
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            if (date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth()) {
+                return '昨天';
+            }
+            
+            // 一週內：顯示星期
+            if (diff < 7 * 24 * 60 * 60 * 1000) {
+                const days = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+                return days[date.getDay()];
+            }
+            
+            // 超過一週：顯示日期
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+
+        // 載入聊天室列表
+        let isLoadingRooms = false;
+        let hasMoreRooms = true;
+        let roomsCursor = '';
+        
+        async function loadRooms(loadMore = false) {
+            if (isLoadingRooms) {
+                return;
+            }
+            
+            // 如果是首次加載，重置狀態
+            if (!loadMore) {
+                rooms = [];
+                roomsCursor = '';
+                hasMoreRooms = true;
+            }
+            
+            // 如果沒有更多數據，不要繼續加載
+            if (loadMore && !hasMoreRooms) {
+                return;
+            }
+            
+            isLoadingRooms = true;
+            try {
+                const url = `${API_BASE}/rooms?user_id=${currentUser}&limit=10&cursor=${roomsCursor}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const newRooms = data.data || [];
+                    
+                    if (loadMore) {
+                        // 追加到現有列表
+                        rooms = [...rooms, ...newRooms];
+                    } else {
+                        // 替換整個列表
+                        rooms = newRooms;
+                    }
+                    
+                    // 更新 cursor 和狀態
+                    roomsCursor = data.cursor || '';
+                    hasMoreRooms = data.has_more || false;
+                    
+                    renderRoomList();
+                } else {
+                    showError('載入聊天室失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('載入聊天室失敗: ' + error.message);
+            } finally {
+                isLoadingRooms = false;
+            }
+        }
+
+        // 渲染聯絡人列表
+        function renderContacts() {
+            const contactsList = document.getElementById('contactsList');
+            
+            // 過濾掉當前用戶
+            const otherContacts = contacts.filter(contact => contact.id !== currentUser);
+            
+            contactsList.innerHTML = otherContacts.map(contact => `
+                <div class="contact-item" data-contact-id="${contact.id}">
+                    <div class="contact-avatar">${contact.name.charAt(0)}</div>
+                    <div class="contact-info">
+                        <div class="contact-name">${contact.name}</div>
+                        <div class="contact-status">${contact.status === 'online' ? '在線' : '離線'}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            // 使用事件委派，避免內聯 onclick
+            contactsList.querySelectorAll('.contact-item').forEach(item => {
+                item.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startChatWith(this.dataset.contactId);
+                };
+            });
+        }
+
+        // 渲染聊天室列表
+        function renderRoomList() {
+            const roomList = document.getElementById('roomList');
+            
+            if (rooms.length === 0) {
+                roomList.innerHTML = '<div class="loading">沒有聊天室</div>';
+                return;
+            }
+            
+            // 按最後訊息時間排序（最新的在上面）
+            const sortedRooms = [...rooms].sort((a, b) => {
+                const timeA = a.last_message_time ? new Date(a.last_message_time) : new Date(a.created_at || 0);
+                const timeB = b.last_message_time ? new Date(b.last_message_time) : new Date(b.created_at || 0);
+                return timeB - timeA;
+            });
+            
+            roomList.innerHTML = sortedRooms.map(room => {
+                const displayName = getRoomDisplayName(room);
+                const lastMessage = room.last_message || '開始新對話...';
+                const lastTime = room.last_message_time ? formatMessageTime(room.last_message_time) : '';
+                const unreadCount = room.unread_count || 0;
+                
+                return `
+                    <div class="room-item ${currentRoom && currentRoom.id === room.id ? 'active' : ''}" data-room-id="${room.id}">
+                        <div class="room-avatar">${displayName.charAt(0)}</div>
+                        <div class="room-info">
+                            <div class="room-header">
+                                <div class="room-name">${displayName}</div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
+                                    <div class="room-time">${lastTime}</div>
+                                </div>
+                            </div>
+                            <div class="room-preview">${lastMessage}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // 使用事件委派，避免內聯 onclick
+            roomList.querySelectorAll('.room-item').forEach(item => {
+                item.onclick = function() {
+                    selectRoom(this.dataset.roomId);
+                };
+            });
+            
+            // 添加 "加載更多" 提示（如果還有更多）
+            if (hasMoreRooms) {
+                const loadMoreDiv = document.createElement('div');
+                loadMoreDiv.className = 'load-more-indicator';
+                loadMoreDiv.id = 'roomsLoadMore';
+                loadMoreDiv.textContent = isLoadingRooms ? '載入中...' : '往下滾動載入更多';
+                loadMoreDiv.style.cssText = 'text-align: center; padding: 15px; color: #999; font-size: 12px;';
+                roomList.appendChild(loadMoreDiv);
+            }
+        }
+        
+        // 監聽聊天室列表滾動（往下滾動加載更多）
+        function setupRoomListScroll() {
+            const sidebarContent = document.querySelector('.sidebar-content');
+            if (!sidebarContent) return;
+            
+            sidebarContent.addEventListener('scroll', function() {
+                // 檢測是否滾動到底部
+                const scrollTop = this.scrollTop;
+                const scrollHeight = this.scrollHeight;
+                const clientHeight = this.clientHeight;
+                
+                // 距離底部 100px 時開始加載
+                if (scrollTop + clientHeight >= scrollHeight - 100) {
+                    if (hasMoreRooms && !isLoadingRooms) {
+                        loadRooms(true); // loadMore = true
+                    }
+                }
+            });
+        }
+        
+        // 監聽訊息容器滾動（往上滾動加載更多歷史訊息）
+        function setupMessagesScroll() {
+            const messagesContainer = document.getElementById('messages');
+            if (!messagesContainer) return;
+            
+            messagesContainer.addEventListener('scroll', function() {
+                // 檢測是否滾動到頂部
+                const scrollTop = this.scrollTop;
+                
+                // 距離頂部 50px 時開始加載
+                if (scrollTop <= 50 && currentRoom && currentRoom.id) {
+                    if (hasMoreMessages[currentRoom.id] && !isLoadingMessages) {
+                        loadMessages(currentRoom.id, true); // loadMore = true
+                    }
+                }
+            });
+        }
+
+        // 開始與聯絡人聊天
+        async function startChatWith(contactId) {
+            console.log('開始聊天:', contactId);
+            
+            // 不能和自己聊天
+            if (contactId === currentUser) {
+                showError('不能和自己聊天');
+                return;
+            }
+
+            // 如果之前是臨時聊天室且未發送訊息，清除它
+            if (currentRoom && currentRoom.isTemporary) {
+                currentRoom = null;
+            }
+
+            // 檢查是否已經有與此聯絡人的聊天室
+            const existingRoom = rooms.find(room => 
+                room.type === 'direct' && 
+                room.members && 
+                room.members.some(member => member.user_id === contactId) &&
+                room.members.some(member => member.user_id === currentUser)
+            );
+
+            if (existingRoom) {
+                // 如果已存在，直接進入聊天室
+                selectRoom(existingRoom.id);
+                return;
+            }
+
+            // 打開臨時聊天窗口（不創建聊天室）
+            const contact = contacts.find(c => c.id === contactId);
+            openTemporaryChatWindow(contactId, contact.name);
+        }
+
+        // 打開臨時聊天窗口（發送第一條訊息時才創建聊天室）
+        function openTemporaryChatWindow(contactId, contactName) {
+            // 創建臨時聊天室對象（未保存到後端）
+            currentRoom = {
+                id: null, // null 表示臨時聊天室
+                name: `與 ${contactName} 的對話`,
+                type: 'direct',
+                owner_id: currentUser,
+                members: [
+                    { user_id: currentUser, role: 'admin' },
+                    { user_id: contactId, role: 'member' }
+                ],
+                isTemporary: true, // 標記為臨時
+                targetContactId: contactId // 記錄目標聯絡人
+            };
+
+            // 更新 UI
+            document.getElementById('chatTitle').textContent = contactName;
+            document.getElementById('chatType').textContent = '一對一聊天';
+            document.getElementById('roomSettingsBtn').style.display = 'none';
+            document.getElementById('showMembersBtn').style.display = 'none';
+            document.getElementById('messages').innerHTML = '<div style="text-align: center; color: #999; padding: 50px;">開始新對話</div>';
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('messageInput').focus();
+
+            // 清空訊息歷史
+            messageHistory[contactId] = [];
+        }
+
+        // 選擇聊天室
+        function selectRoom(roomId) {
+            console.log('選擇聊天室:', roomId);
+            
+            // 如果之前是臨時聊天室且未發送訊息，清除它
+            if (currentRoom && currentRoom.isTemporary) {
+                currentRoom = null;
+            }
+            
+            const room = rooms.find(r => r.id === roomId);
+            if (!room) {
+                console.error('找不到聊天室:', roomId);
+                return;
+            }
+
+            currentRoom = room;
+            
+            // 更新 UI
+            const memberCount = room.members ? room.members.length : 0;
+            const memberNames = room.members ? room.members.map(m => getDisplayName(m.user_id)).join(', ') : '';
+            
+            document.getElementById('chatTitle').textContent = getRoomDisplayName(room) + (room.type === 'group' ? ` (${memberCount}人)` : '');
+            document.getElementById('chatType').textContent = room.type === 'direct' ? 
+                '一對一聊天' : 
+                `群組聊天 · 成員: ${memberNames}`;
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            
+            // 顯示或隱藏設置按鈕和成員按鈕（只有群組才顯示）
+            document.getElementById('roomSettingsBtn').style.display = room.type === 'group' ? 'block' : 'none';
+            document.getElementById('showMembersBtn').style.display = room.type === 'group' ? 'block' : 'none';
+            
+            // 立即更新選中樣式（使用更高效的方式）
+            const previousActive = document.querySelector('.room-item.active');
+            if (previousActive) {
+                previousActive.classList.remove('active');
+            }
+            const roomItem = document.querySelector(`[data-room-id="${roomId}"]`);
+            if (roomItem) {
+                roomItem.classList.add('active');
+            }
+
+            // 立即標記為已讀（樂觀更新，不等待）
+            markRoomAsRead(roomId);
+
+            // 其他操作延遲執行（不阻塞 UI）
+            requestAnimationFrame(() => {
+                // 更新成員側邊欄
+                renderMembersSidebar();
+                
+                // 載入消息歷史
+                loadMessages(roomId);
+                
+                // 連接 WebSocket
+                connectWebSocket(roomId);
+            });
+        }
+
+        // 標記聊天室為已讀
+        async function markRoomAsRead(roomId) {
+            // 先立即更新 UI（樂觀更新），不等待網絡請求
+            const room = rooms.find(r => r.id === roomId);
+            if (room) {
+                room.unread_count = 0;
+            }
+            
+            // 直接移除該聊天室的未讀標記（立即生效）
+            const roomItem = document.querySelector(`[data-room-id="${roomId}"]`);
+            if (roomItem) {
+                const badge = roomItem.querySelector('.unread-badge');
+                if (badge) {
+                    badge.remove();
+                }
+            }
+            
+            // 然後在背景發送請求到後端（不阻塞 UI）
+            try {
+                fetch(`${API_BASE}/messages/read`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        room_id: roomId,
+                        user_id: currentUser
+                    })
+                }).catch(error => {
+                    console.log('標記已讀失敗:', error);
+                });
+            } catch (error) {
+                console.log('標記已讀失敗:', error);
+            }
+        }
+
+        // 載入消息歷史
+        let isLoadingMessages = false;
+        let messagesCursor = {}; // 每個房間的 cursor，格式：{ roomId: cursor }
+        let hasMoreMessages = {}; // 每個房間是否還有更多消息
+        
+        async function loadMessages(roomId, loadMore = false) {
+            if (isLoadingMessages) {
+                return;
+            }
+            
+            // 如果是首次加載，重置狀態
+            if (!loadMore) {
+                messageHistory[roomId] = [];
+                messagesCursor[roomId] = '';
+                hasMoreMessages[roomId] = true;
+            }
+            
+            // 如果沒有更多數據，不要繼續加載
+            if (loadMore && !hasMoreMessages[roomId]) {
+                return;
+            }
+            
+            isLoadingMessages = true;
+            try {
+                const cursor = messagesCursor[roomId] || '';
+                const url = `${API_BASE}/messages?room_id=${roomId}&user_id=${currentUser}&limit=20&cursor=${cursor}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const newMessages = data.data || [];
+                    
+                    // 後端返回的是降序（最新在前），需要反轉成升序（最舊在前）
+                    const reversedMessages = [...newMessages].reverse();
+                    
+                    if (loadMore) {
+                        // 往前追加（舊消息在前）- 這些是更早的訊息，放在前面
+                        messageHistory[roomId] = [...reversedMessages, ...messageHistory[roomId]];
+                    } else {
+                        // 首次加載
+                        messageHistory[roomId] = reversedMessages;
+                    }
+                    
+                    // 更新 cursor 和狀態
+                    messagesCursor[roomId] = data.next_cursor || '';
+                    hasMoreMessages[roomId] = data.has_more || false;
+                    
+                    renderMessages(roomId, loadMore);
+                } else {
+                    showError('載入消息失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('載入消息失敗: ' + error.message);
+            } finally {
+                isLoadingMessages = false;
+            }
+        }
+
+        // 渲染消息
+        function renderMessages(roomId, loadMore = false) {
+            const messages = messageHistory[roomId] || [];
+            const messagesContainer = document.getElementById('messages');
+            
+            // 如果是加載更多（往上加載），保存當前滾動位置
+            let previousScrollHeight = 0;
+            if (loadMore) {
+                previousScrollHeight = messagesContainer.scrollHeight;
+            }
+            
+            if (messages.length === 0) {
+                messagesContainer.innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">還沒有消息</div>';
+                return;
+            }
+            
+            // 在開頭添加 "加載更多" 提示
+            let loadMoreIndicator = '';
+            if (hasMoreMessages[roomId]) {
+                loadMoreIndicator = `<div class="load-more-indicator" style="text-align: center; padding: 15px; color: #999; font-size: 12px;">
+                    ${isLoadingMessages ? '載入中...' : '往上滾動載入更多'}
+                </div>`;
+            }
+
+            messagesContainer.innerHTML = loadMoreIndicator + messages.map(msg => {
+                // 系統消息特殊處理
+                if (msg.type === 'system' || msg.sender_id === 'system') {
+                    return `
+                        <div class="message system">
+                            <div class="message-content">
+                                ${getDisplayName(msg.content.replace(' 已加入群組', '').replace(' 已離開群組', ''))}${msg.content.includes('已加入群組') ? ' 已加入群組' : ' 已離開群組'}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // 計算已讀狀態
+                const readBy = msg.read_by || [];
+                
+                // 獲取聊天室成員
+                const room = rooms.find(r => r.id === msg.room_id);
+                
+                // 排除自己和發送者，只計算其他人的已讀
+                const otherReadBy = readBy.filter(userId => {
+                    return userId !== currentUser && userId !== msg.sender_id;
+                });
+                const readCount = otherReadBy.length;
+                
+                // 獲取聊天室成員數量（用於群組已讀計算，排除自己和發送者）
+                const otherMemberCount = (room && room.members) ? room.members.filter(member => 
+                    member.user_id !== currentUser && member.user_id !== msg.sender_id
+                ).length : 1;
+                
+                let readStatus = '';
+                if (msg.sender_id === currentUser) {
+                    if (readCount > 0) {
+                        if (room && room.type === 'group') {
+                            readStatus = `${readCount}已讀`;
+                        } else if (room && room.members) {
+                            // 私聊：檢查對方是否已讀
+                            const otherMember = room.members.find(member => member.user_id !== currentUser);
+                            const isReadByOther = otherMember && readBy.includes(otherMember.user_id);
+                            readStatus = isReadByOther ? '已讀' : '已送達';
+                        } else {
+                            readStatus = '已送達';
+                        }
+                    } else {
+                        readStatus = '已送達';
+                    }
+                }
+
+                return `
+                    <div class="message ${msg.sender_id === currentUser ? 'own' : 'other'}">
+                        <div class="message-avatar">${getDisplayName(msg.sender_id).charAt(0)}</div>
+                        <div>
+                            <div class="message-content">
+                                ${msg.content}
+                            </div>
+                            <div class="message-info">
+                                ${msg.sender_id === currentUser ? 
+                                    `<span>${new Date(msg.created_at * 1000).toLocaleTimeString()}</span>${readStatus ? '<span class="read-status">' + readStatus + '</span>' : ''}` : 
+                                    `${getDisplayName(msg.sender_id)} • ${new Date(msg.created_at * 1000).toLocaleTimeString()}`
+                                }
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 恢復滾動位置（往上加載時）或滾動到底部（首次加載）
+            if (loadMore && previousScrollHeight > 0) {
+                // 保持原來的位置（減去新內容的高度差）
+                const newScrollHeight = messagesContainer.scrollHeight;
+                messagesContainer.scrollTop = newScrollHeight - previousScrollHeight;
+            } else {
+                // 滾動到底部
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        // 連接 WebSocket（暫時禁用）
+        function connectWebSocket(roomId) {
+            // 關閉舊的 SSE 連接
+            if (window.eventSource) {
+                window.eventSource.close();
+            }
+            
+            // 清除舊的輪詢定時器
+            if (window.messageRefreshInterval) {
+                clearInterval(window.messageRefreshInterval);
+            }
+            
+            // 使用 SSE (Server-Sent Events) 連接 gRPC Stream
+            const url = `${API_BASE}/messages/stream?room_id=${roomId}&user_id=${currentUser}`;
+            window.eventSource = new EventSource(url);
+            
+            window.eventSource.onopen = function() {
+                updateStatus('已連接', 'connected');
+            };
+            
+            // 監聽連接確認事件
+            window.eventSource.addEventListener('connected', function(e) {
+                updateStatus('已連接', 'connected');
+            });
+            
+            // 監聽心跳事件
+            window.eventSource.addEventListener('ping', function(e) {
+                // 保持連接活躍
+            });
+            
+            // 監聽訊息事件
+            window.eventSource.addEventListener('message', function(e) {
+                try {
+                    const message = JSON.parse(e.data);
+                    
+                    // 只處理當前聊天室的訊息
+                    if (message.room_id !== roomId) {
+                        return;
+                    }
+                    
+                    // 添加到訊息歷史
+                    if (!messageHistory[roomId]) {
+                        messageHistory[roomId] = [];
+                    }
+                    
+                    // 檢查是否已存在（避免重複）
+                    const exists = messageHistory[roomId].some(m => m.id === message.id);
+                    if (!exists) {
+                        messageHistory[roomId].push(message);
+                        renderMessages(roomId);
+                        
+                        // 自動標記為已讀
+                        markRoomAsRead(roomId);
+                    }
+                } catch (error) {
+                    console.error('處理 SSE 訊息失敗:', error);
+                }
+            });
+            
+            // 監聽錯誤事件
+            window.eventSource.addEventListener('error', function(e) {
+                // 靜默處理錯誤
+            });
+            
+            window.eventSource.onerror = function(error) {
+                updateStatus('連接中斷', 'disconnected');
+                
+                // 關閉舊連接
+                if (window.eventSource) {
+                    window.eventSource.close();
+                }
+                
+                // 5秒後重新連接
+                setTimeout(() => {
+                    if (currentRoom && currentRoom.id === roomId) {
+                        connectWebSocket(roomId);
+                    }
+                }, 5000);
+            };
+        }
+
+        // 處理 WebSocket 消息
+        function handleWebSocketMessage(message) {
+            if (message.type === 'new_message' && message.room_id === currentRoom.id) {
+                // 添加新消息到歷史記錄
+                if (!messageHistory[currentRoom.id]) {
+                    messageHistory[currentRoom.id] = [];
+                }
+                messageHistory[currentRoom.id].push(message);
+                
+                // 重新渲染消息
+                renderMessages(currentRoom.id);
+            }
+        }
+
+        // 發送消息
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+            
+            if (!content || !currentRoom) return;
+
+            try {
+                // 如果是臨時聊天室（尚未創建），先創建聊天室
+                if (currentRoom.isTemporary) {
+                    const createResponse = await fetch(`${API_BASE}/rooms`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            name: currentRoom.name,
+                            type: 'direct',
+                            owner_id: currentUser,
+                            members: currentRoom.members
+                        })
+                    });
+
+                    const createData = await createResponse.json();
+                    
+                    if (!createData.success) {
+                        showError('創建聊天室失敗: ' + createData.message);
+                        return;
+                    }
+
+                    // 更新當前聊天室為真實聊天室
+                    currentRoom.id = createData.data.id;
+                    currentRoom.isTemporary = false;
+                    delete currentRoom.targetContactId;
+
+                    // 添加到聊天室列表
+                    rooms.push(currentRoom);
+                    renderRoomList();
+                }
+
+                // 發送訊息
+                const response = await fetch(`${API_BASE}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        room_id: currentRoom.id,
+                        sender_id: currentUser,
+                        content: content,
+                        type: 'text'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    input.value = '';
+                    // 立即刷新消息列表和聊天室列表
+                    await loadMessages(currentRoom.id);
+                    await loadRooms();
+                } else {
+                    showError('發送消息失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('發送消息失敗: ' + error.message);
+            }
+        }
+
+        // 創建聊天室
+        async function createRoom() {
+            const name = document.getElementById('roomName').value;
+            const selectedMembers = Array.from(document.getElementById('roomMembers').selectedOptions).map(option => option.value);
+            
+            // 群組聊天需要選擇至少1個成員（不含自己）
+            if (selectedMembers.length < 1) {
+                showError('群組聊天需要選擇至少1個其他成員');
+                return;
+            }
+
+            try {
+                // 後端會自動加入創建者，所有人都是 member（沒有管理員）
+                const membersData = selectedMembers.map(memberId => ({
+                    user_id: memberId,
+                    role: 'member'
+                }));
+
+                const response = await fetch(`${API_BASE}/rooms`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        type: 'group',
+                        owner_id: currentUser,
+                        members: membersData
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('聊天室創建成功');
+                    hideCreateRoomModal();
+                    loadRooms();
+                } else {
+                    showError('創建聊天室失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('創建聊天室失敗: ' + error.message);
+            }
+        }
+
+        // 顯示創建聊天室模態框
+        function showCreateRoomModal() {
+            document.getElementById('createRoomModal').style.display = 'block';
+            document.getElementById('roomName').value = '';
+            
+            // 更新成員列表（過濾掉當前用戶）
+            const membersSelect = document.getElementById('roomMembers');
+            membersSelect.innerHTML = contacts
+                .filter(c => c.id !== currentUser)
+                .map(contact => `<option value="${contact.id}">${contact.name}</option>`)
+                .join('');
+        }
+
+        // 隱藏創建聊天室模態框
+        function hideCreateRoomModal() {
+            document.getElementById('createRoomModal').style.display = 'none';
+        }
+
+        // 顯示群組設置
+        function showRoomSettings() {
+            if (!currentRoom || currentRoom.type !== 'group') {
+                showError('只有群組聊天才能進行設置');
+                return;
+            }
+
+            document.getElementById('roomSettingsModal').style.display = 'block';
+            renderRoomMembers();
+            updateAddMemberSelect();
+        }
+
+        // 隱藏群組設置
+        function hideRoomSettings() {
+            document.getElementById('roomSettingsModal').style.display = 'none';
+        }
+
+        // 渲染群組成員列表
+        function renderRoomMembers() {
+            const membersList = document.getElementById('roomMembersList');
+            const room = rooms.find(r => r.id === currentRoom.id);
+            
+            if (!room || !room.members) {
+                membersList.innerHTML = '<p>無成員資料</p>';
+                return;
+            }
+
+            membersList.innerHTML = room.members.map(member => {
+                const contact = contacts.find(c => c.id === member.user_id);
+                const displayName = contact ? contact.name : member.user_id;
+                const isCurrentUser = member.user_id === currentUser;
+                
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee;">
+                        <div>
+                            <span style="font-weight: 500;">${displayName}</span>
+                            ${member.role === 'admin' ? '<span style="color: #007bff; margin-left: 5px; font-size: 12px;">管理員</span>' : ''}
+                            ${isCurrentUser ? '<span style="color: #666; margin-left: 5px; font-size: 12px;">(我)</span>' : ''}
+                        </div>
+                        ${!isCurrentUser ? `<button class="btn btn-danger" style="padding: 5px 10px; font-size: 12px;" onclick="removeMember('${member.user_id}')">移除</button>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 更新可添加成員的下拉選單
+        function updateAddMemberSelect() {
+            const select = document.getElementById('addMemberSelect');
+            const room = rooms.find(r => r.id === currentRoom.id);
+            
+            if (!room || !room.members) {
+                select.innerHTML = '<option value="">選擇要添加的成員</option>';
+                return;
+            }
+
+            const memberIds = room.members.map(m => m.user_id);
+            const availableContacts = contacts.filter(c => !memberIds.includes(c.id));
+
+            select.innerHTML = '<option value="">選擇要添加的成員</option>' + 
+                availableContacts.map(contact => 
+                    `<option value="${contact.id}">${contact.name}</option>`
+                ).join('');
+        }
+
+        // 添加成員
+        async function addMember() {
+            const select = document.getElementById('addMemberSelect');
+            const userId = select.value;
+
+            if (!userId) {
+                showError('請選擇要添加的成員');
+                return;
+            }
+
+            console.log('添加成員 - Room ID:', currentRoom.id, 'User ID:', userId);
+            console.log('完整 Room 對象:', currentRoom);
+
+            try {
+                const url = `${API_BASE}/rooms/${currentRoom.id}/members`;
+                console.log('請求 URL:', url);
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: userId
+                    })
+                });
+
+                const data = await response.json();
+                console.log('添加成員回應:', data);
+                
+                if (data.success) {
+                    showSuccess('成員添加成功');
+                    // 重新載入聊天室列表
+                    await loadRooms();
+                    // 更新當前聊天室對象
+                    const updatedRoom = rooms.find(r => r.id === currentRoom.id);
+                    if (updatedRoom) {
+                        currentRoom = updatedRoom;
+                    }
+                    // 重新渲染成員列表
+                    renderRoomMembers();
+                    updateAddMemberSelect();
+                    // 重新載入消息以顯示系統消息
+                    await loadMessages(currentRoom.id);
+                } else {
+                    showError('添加成員失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('添加成員失敗: ' + error.message);
+            }
+        }
+
+        // 移除成員
+        async function removeMember(userId) {
+            if (!confirm('確定要移除此成員嗎？')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/rooms/${currentRoom.id}/members/${userId}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('成員移除成功');
+                    // 重新載入聊天室列表
+                    await loadRooms();
+                    // 更新當前聊天室對象
+                    const updatedRoom = rooms.find(r => r.id === currentRoom.id);
+                    if (updatedRoom) {
+                        currentRoom = updatedRoom;
+                    }
+                    // 重新渲染成員列表
+                    renderRoomMembers();
+                    updateAddMemberSelect();
+                    // 重新載入消息以顯示系統消息
+                    await loadMessages(currentRoom.id);
+                } else {
+                    showError('移除成員失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('移除成員失敗: ' + error.message);
+            }
+        }
+
+        // 退出群組
+        async function leaveRoom() {
+            if (!confirm('確定要退出群組嗎？')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/rooms/${currentRoom.id}/members/${currentUser}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('已退出群組');
+                    hideRoomSettings();
+                    currentRoom = null;
+                    document.getElementById('chatTitle').textContent = '選擇聊天室';
+                    document.getElementById('chatType').textContent = '';
+                    document.getElementById('roomSettingsBtn').style.display = 'none';
+                    document.getElementById('messages').innerHTML = '<div style="text-align: center; color: #999; padding: 80px 50px; display: flex; flex-direction: column; align-items: center; gap: 20px;"><div style="font-size: 64px;">💬</div><div style="font-size: 18px; color: #666;">選擇聊天室開始對話</div><div style="font-size: 14px; color: #999;">從左側聊天室列表選擇，或點擊聯絡人開始新對話</div></div>';
+                    document.getElementById('messageInput').disabled = true;
+                    document.getElementById('sendBtn').disabled = true;
+                    await loadRooms();
+                } else {
+                    showError('退出群組失敗: ' + data.message);
+                }
+            } catch (error) {
+                showError('退出群組失敗: ' + error.message);
+            }
+        }
+
+        // 更新狀態
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            if (status) {
+                status.textContent = text;
+                status.className = `status ${className}`;
+            }
+        }
+
+        // 顯示錯誤
+        function showError(message) {
+            const messages = document.getElementById('messages');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            messages.appendChild(errorDiv);
+            
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
+        }
+
+        // 顯示成功消息
+        function showSuccess(message) {
+            const messages = document.getElementById('messages');
+            const successDiv = document.createElement('div');
+            successDiv.className = 'success';
+            successDiv.textContent = message;
+            messages.appendChild(successDiv);
+            
+            setTimeout(() => {
+                successDiv.remove();
+            }, 3000);
+        }
+
+        // 點擊模態框外部關閉
+        window.onclick = function(event) {
+            const createModal = document.getElementById('createRoomModal');
+            const settingsModal = document.getElementById('roomSettingsModal');
+            
+            if (event.target === createModal) {
+                hideCreateRoomModal();
+            }
+            if (event.target === settingsModal) {
+                hideRoomSettings();
+            }
+        }
+
+        // 切換成員列表顯示/隱藏
+        function toggleMemberList() {
+            const sidebar = document.getElementById('membersSidebar');
+            if (sidebar.style.display === 'none' || !sidebar.style.display) {
+                sidebar.style.display = 'flex';
+                renderMembersSidebar();
+            } else {
+                sidebar.style.display = 'none';
+            }
+        }
+
+        // 渲染成員側邊欄
+        function renderMembersSidebar() {
+            const membersList = document.getElementById('membersSidebarList');
+            
+            if (!currentRoom || !currentRoom.members) {
+                membersList.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">沒有成員</div>';
+                return;
+            }
+
+            membersList.innerHTML = currentRoom.members.map(member => {
+                const displayName = getDisplayName(member.user_id);
+                const roleText = member.role === 'admin' ? '管理員' : '成員';
+                const isCurrentUser = member.user_id === currentUser;
+                
+                return `
+                    <div class="member-item">
+                        <div class="member-avatar">${displayName.charAt(0)}</div>
+                        <div class="member-info">
+                            <div class="member-name">${displayName}${isCurrentUser ? ' (我)' : ''}</div>
+                            <div class="member-role">${roleText}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 全局錯誤捕捉
+        window.addEventListener('error', function(event) {
+            console.error('全局錯誤:', event.error);
+            console.error('錯誤訊息:', event.message);
+            console.error('錯誤位置:', event.filename, event.lineno, event.colno);
+            // 防止頁面重新載入
+            event.preventDefault();
+        });
+
+        window.addEventListener('unhandledrejection', function(event) {
+            console.error('未處理的 Promise 錯誤:', event.reason);
+            // 防止頁面重新載入
+            event.preventDefault();
+        });
+    </script>
+</body>
+</html>

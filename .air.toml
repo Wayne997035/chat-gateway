@@ -1,0 +1,24 @@
+[build]
+cmd = "go build -o chat_gateway ./cmd/api"
+bin = "./chat_gateway"
+full_bin = "CONFIG_PATH=./configs/local.yaml LOG_PATH=./logs ./chat_gateway"
+include_ext = ["go"]
+exclude_dir = ["vendor", "node_modules", "tmp", "build", "logs"]
+delay = 1000              # Delay 1 second after file changes before building
+
+[watch]
+paths = ["."]
+
+[color]                   # Color settings
+build = "yellow"          # Build messages in yellow
+main = "magenta"          # Main program messages in magenta
+runner = "green"          # Runner messages in green
+watcher = "cyan"          # Watcher messages in cyan
+
+[log]                     # Log settings
+main_only = false         # Show all messages (build, watch, program execution)
+time = false              # Don't show timestamps, keep it clean
+
+[screen]                  # Screen settings
+clear_on_rebuild = false  # Don't clear screen on rebuild
+keep_scroll = true        # Keep scroll position

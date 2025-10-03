@@ -1,0 +1,71 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+  gomnd:
+    settings:
+      mnd:
+        checks: argument,case,condition,operation,return,assign
+  govet:
+    check-shadowing: true
+  misspell:
+    locale: US
+  nolintlint:
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: false
+    require-specific: false
+
+linters:
+  enable:
+    - bodyclose
+    - dogsled
+    - dupl
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - whitespace
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gomnd
+        - funlen
+        - gocyclo
