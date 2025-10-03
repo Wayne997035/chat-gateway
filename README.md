@@ -1,423 +1,759 @@
 # Chat Gateway - 聊天室微服務
 
-一個基於 gRPC 的聊天室微服務，提供一對一和群組聊天功能，類似 Facebook Messenger / LINE 的聊天體驗。
+一個基於 gRPC 的企業級聊天室微服務，提供端到端加密、即時通訊、群組管理等完整功能。
 
-## 🎯 專案特色
+## 目錄
 
-- **gRPC 優先設計** - 核心服務採用 gRPC，提供高效能的服務間通訊
-- **防重複聊天室** - 自動檢測並防止創建重複的一對一聊天室
-- **即時已讀狀態** - 支援一對一和群組的已讀/送達狀態追蹤
-- **成員管理** - 完整的群組成員管理（添加/移除/退出）
-- **MongoDB 儲存** - 使用 MongoDB 進行持久化儲存，支援高效查詢
-- **🔒 安全功能** - 消息加密、審計日誌、TLS 支援（詳見安全章節）
-- **📊 GCP Cloud Logging** - 結構化 JSON 日誌，支援 trace ID 追蹤
+- [系統架構](#系統架構)
+- [核心功能](#核心功能)
+- [技術棧](#技術棧)
+- [快速開始](#快速開始)
+- [配置說明](#配置說明)
+- [API 文檔](#api-文檔)
+- [安全特性](#安全特性)
+- [開發指南](#開發指南)
+- [測試](#測試)
+- [部署](#部署)
+- [常見問題](#常見問題)
 
-## 🏗️ 系統架構
+## 系統架構
 
-### 核心服務
+### 服務設計
 
-本專案的核心是 **gRPC 服務**，其他系統可以直接調用 gRPC 接口進行通訊。
+Chat Gateway 採用分層架構設計，核心為 gRPC 服務，支持多種客戶端接入：
 
 ```
-┌─────────────┐
-│ 其他微服務  │ ──→ gRPC (Port 8081)
-└─────────────┘
-
-┌─────────────┐
-│ Web前端     │ ──→ HTTP API Bridge (Port 8080) ──→ gRPC (Port 8081)
-└─────────────┘                                     ↓
-                                                MongoDB
+┌──────────────────┐
+│   客戶端應用     │
+│  (Web/Mobile)    │
+└─────────┬────────┘
+          │
+          ↓
+┌──────────────────┐         ┌──────────────────┐
+│   HTTP Gateway   │←────────│  其他微服務      │
+│   (Port 8080)    │         │  (直接 gRPC)     │
+└─────────┬────────┘         └────────┬─────────┘
+          │                           │
+          ↓                           ↓
+┌──────────────────────────────────────────────┐
+│          gRPC Chat Service (Port 8081)       │
+│  ┌──────────────┐  ┌───────────────────┐    │
+│  │ Room Service │  │ Message Service   │    │
+│  └──────────────┘  └───────────────────┘    │
+│  ┌──────────────┐  ┌───────────────────┐    │
+│  │ Key Manager  │  │  Audit Service    │    │
+│  └──────────────┘  └───────────────────┘    │
+└───────────────────┬──────────────────────────┘
+                    │
+                    ↓
+        ┌───────────────────────┐
+        │      MongoDB          │
+        │  ┌─────────────────┐  │
+        │  │   chatrooms     │  │
+        │  │   messages      │  │
+        │  │   encryption_keys│ │
+        │  └─────────────────┘  │
+        └───────────────────────┘
 ```
 
-### 已實現功能
+### 數據流
 
-#### gRPC 服務 (核心)
-1. ✅ **CreateRoom** - 創建聊天室（一對一/群組）
-2. ✅ **ListUserRooms** - 列出用戶的聊天室
-3. ✅ **JoinRoom** - 加入聊天室
-4. ✅ **LeaveRoom** - 離開聊天室
-5. ✅ **SendMessage** - 發送消息
-6. ✅ **GetMessages** - 獲取消息列表
-7. ✅ **MarkAsRead** - 標記消息為已讀
-8. ✅ **GetRoomInfo** - 獲取聊天室信息
-9. ⏳ **StreamMessages** - 流式獲取消息（待實現）
-10. ⏳ **GetUnreadCount** - 獲取未讀數量（待實現）
+1. **消息發送流程**
+   - 客戶端 -> HTTP API
+   - HTTP -> gRPC Service
+   - 消息加密 (AES-256-CTR)
+   - 存儲到 MongoDB
+   - SSE 實時推送給訂閱者
 
-#### HTTP API Bridge (測試用)
-- POST `/api/v1/rooms` - 創建聊天室
-- GET `/api/v1/rooms` - 獲取聊天室列表
-- POST `/api/v1/rooms/:room_id/members` - 添加成員
-- DELETE `/api/v1/rooms/:room_id/members/:user_id` - 移除成員/退出群組
-- POST `/api/v1/messages` - 發送消息
-- GET `/api/v1/messages` - 獲取消息
-- POST `/api/v1/messages/read` - 標記已讀
+2. **密鑰管理流程**
+   - Master Key (環境變量)
+   - Room Key 生成 (每個聊天室獨立密鑰)
+   - Key 用 Master Key 加密後存儲
+   - 支持密鑰輪替和版本管理
 
-> **注意**: HTTP API 僅供測試使用，正式環境請使用 gRPC 接口。
+## 核心功能
 
-### 技術棧
+### 聊天室管理
 
-- **後端**: Go 1.24 + gRPC + Protocol Buffers
-- **數據庫**: MongoDB 4.4+
-- **開發工具**: Air (熱重載)
-- **測試工具**: grpcurl, curl
-- **消息推送**: HTTP 輪詢 (WebSocket 待實現)
+#### 1. 聊天室類型
+- **一對一聊天** (direct)
+  - 自動防重複創建
+  - 兩人之間只能有一個一對一聊天室
+  
+- **群組聊天** (group)
+  - 支持多人群組
+  - 成員管理（添加/移除/退出）
+  - 群組設置可配置
 
-## 📁 專案結構
+#### 2. 聊天室功能
+- 創建聊天室
+- 列出用戶聊天室（支持分頁和游標）
+- 獲取聊天室詳情
+- 添加/移除成員
+- 加入/離開群組
+- 系統訊息（加入/離開通知）
+
+### 消息功能
+
+#### 1. 消息類型
+- 文字消息
+- 圖片（預留）
+- 文件（預留）
+- 語音（預留）
+- 系統消息
+
+#### 2. 消息操作
+- 發送消息（端到端加密）
+- 獲取消息歷史（支持分頁）
+- 實時消息推送（Server-Sent Events）
+- 標記已讀/送達
+- 未讀數量統計
+
+#### 3. 消息狀態
+- 已發送
+- 已送達
+- 已讀（顯示已讀用戶列表）
+
+### 安全特性
+
+#### 1. 端到端加密
+- **加密算法**: AES-256-CTR
+- **密鑰管理**: 每個聊天室獨立密鑰
+- **密鑰存儲**: Master Key 加密後存儲於 MongoDB
+- **密鑰輪替**: 支持自動和手動輪替
+- **版本管理**: 保留歷史密鑰用於解密舊消息
+
+#### 2. 傳輸安全
+- gRPC TLS 支持（可選）
+- MongoDB TLS 連接（可選）
+- HTTP Security Headers
+  - X-Frame-Options
+  - X-Content-Type-Options
+  - Content-Security-Policy
+  - Referrer-Policy
+
+#### 3. 訪問控制
+- CORS 白名單
+- Rate Limiting（可配置）
+  - 全局限制
+  - 端點級別限制
+  - IP 級別限制
+- SSE 連接限制
+  - 每 IP 最大連接數
+  - 連接間隔限制
+  - 全局連接數限制
+
+#### 4. 輸入驗證
+- Room ID 驗證（MongoDB ObjectID）
+- User ID 驗證（長度、特殊字符）
+- 消息內容驗證（長度、NULL 字符）
+- MongoDB 查詢防注入
+
+#### 5. 審計日誌
+- 所有關鍵操作記錄
+- 包含 IP、User-Agent、Request ID
+- 結構化 JSON 格式
+- 支持 GCP Cloud Logging
+
+## 技術棧
+
+### 後端
+- **語言**: Go 1.21+
+- **框架**: 
+  - gRPC (服務間通訊)
+  - Gin (HTTP Gateway)
+- **數據庫**: MongoDB v2
+- **配置管理**: Viper
+- **日誌**: 自定義 Logger (GCP Cloud Logging 格式)
+
+### 安全
+- **加密**: AES-256-CTR
+- **密鑰管理**: 自建 KeyManager with Persistence
+- **審計**: 自建 Audit Service
+- **TLS**: Go crypto/tls
+
+### 開發工具
+- Protocol Buffers (Proto3)
+- Go Modules
+- MongoDB Driver v2
+
+## 快速開始
+
+### 前置需求
+
+- Go 1.21 或更高版本
+- MongoDB 4.4 或更高版本
+- Protocol Buffers Compiler
+
+### 安裝
+
+1. 克隆專案
+```bash
+git clone <repository-url>
+cd chat-gateway
+```
+
+2. 安裝依賴
+```bash
+go mod download
+```
+
+3. 生成 Proto 文件（如果修改了 proto）
+```bash
+./scripts/generate_proto.sh
+```
+
+4. 配置環境變量
+```bash
+# MongoDB 連接
+export MONGO_URI="mongodb://localhost:27017"
+export MONGO_DATABASE="chatroom"
+
+# 加密（生產環境必須設置）
+export MASTER_KEY=$(openssl rand -base64 32)
+
+# 可選：啟用金鑰輪替
+export KEY_ROTATION_ENABLED=true
+```
+
+5. 啟動服務
+```bash
+# 編譯
+go build -o bin/chat-gateway cmd/api/main.go
+
+# 運行
+./bin/chat-gateway
+```
+
+服務將在以下端口啟動：
+- gRPC Server: `localhost:8081`
+- HTTP Gateway: `localhost:8080`
+
+### 測試
+
+使用提供的測試前端：
+```bash
+# 直接打開 web/index.html
+open web/index.html
+```
+
+或使用 Live Server (VSCode):
+1. 安裝 Live Server 擴展
+2. 右鍵 `web/index.html` -> Open with Live Server
+
+## 配置說明
+
+### 配置文件
+
+主配置文件：`configs/local.yaml`
+
+```yaml
+app:
+  name: "ChatGateway"
+  env: "local"
+  debug: true
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30
+  write_timeout: 30
+
+grpc:
+  host: "localhost"
+  port: 8081
+
+database:
+  mongo:
+    host: "localhost"
+    port: 27017
+    database: "chatroom"
+    connect_timeout: 10
+    # TLS 配置（可選）
+    tls_enabled: false
+    tls_ca_file: ""
+    tls_cert_file: ""
+    tls_key_file: ""
+
+security:
+  encryption:
+    enabled: true
+  audit:
+    enabled: true
+  # TLS 配置（可選）
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+
+limits:
+  # 請求限制
+  request:
+    max_body_size: 10485760      # 10MB
+    max_multipart_memory: 10485760
+
+  # Rate Limiting
+  rate_limiting:
+    enabled: true
+    default_per_minute: 100
+    messages_per_minute: 30
+    rooms_per_minute: 10
+    sse_per_minute: 30
+
+  # SSE 連接限制
+  sse:
+    max_connections_per_ip: 5
+    max_total_connections: 1000
+    min_connection_interval_seconds: 1
+    heartbeat_interval_seconds: 15
+    initial_message_fetch: 100
+    message_channel_buffer: 10
+
+  # 分頁限制
+  pagination:
+    default_page_size: 20
+    max_page_size: 100
+    max_history_size: 50
+
+  # 聊天室限制
+  room:
+    max_members: 1000
+    max_name_length: 100
+
+  # 消息限制
+  message:
+    max_length: 10000
+
+  # MongoDB 查詢限制
+  mongodb:
+    default_query_limit: 20
+    max_query_limit: 100
+    max_history_limit: 50
+```
+
+### 環境變量
+
+優先級：環境變量 > 配置文件
+
+必需：
+- `MONGO_URI` 或 `MONGO_HOST` + `MONGO_PORT`
+- `MONGO_DATABASE`
+- `MASTER_KEY` (生產環境)
+
+可選：
+- `MONGO_USERNAME`
+- `MONGO_PASSWORD`
+- `KEY_ROTATION_ENABLED`
+- `GIN_MODE` (release/debug)
+
+## API 文檔
+
+### HTTP API
+
+#### 聊天室
+
+**創建聊天室**
+```http
+POST /api/v1/rooms
+Content-Type: application/json
+
+{
+  "name": "測試群組",
+  "type": "group",
+  "owner_id": "user_alice",
+  "members": ["user_alice", "user_bob"]
+}
+```
+
+**列出聊天室**
+```http
+GET /api/v1/rooms?user_id=user_alice&limit=20&cursor=
+```
+
+**添加成員**
+```http
+POST /api/v1/rooms/:room_id/members
+Content-Type: application/json
+
+{
+  "user_id": "user_charlie"
+}
+```
+
+**移除成員**
+```http
+DELETE /api/v1/rooms/:room_id/members/:user_id
+```
+
+#### 消息
+
+**發送消息**
+```http
+POST /api/v1/messages
+Content-Type: application/json
+
+{
+  "room_id": "507f1f77bcf86cd799439011",
+  "sender_id": "user_alice",
+  "content": "Hello!",
+  "type": "text"
+}
+```
+
+**獲取消息**
+```http
+GET /api/v1/messages?room_id=507f1f77bcf86cd799439011&user_id=user_alice&limit=20&cursor=
+```
+
+**標記已讀**
+```http
+POST /api/v1/messages/read
+Content-Type: application/json
+
+{
+  "room_id": "507f1f77bcf86cd799439011",
+  "user_id": "user_alice"
+}
+```
+
+**SSE 訂閱（實時消息）**
+```http
+GET /api/v1/messages/stream?room_id=507f1f77bcf86cd799439011&user_id=user_alice
+```
+
+### gRPC API
+
+參見 `proto/chat.proto` 文件
+
+主要服務：
+- `ChatRoomService.CreateRoom`
+- `ChatRoomService.ListUserRooms`
+- `ChatRoomService.JoinRoom`
+- `ChatRoomService.LeaveRoom`
+- `ChatRoomService.SendMessage`
+- `ChatRoomService.GetMessages`
+- `ChatRoomService.MarkAsRead`
+- `ChatRoomService.GetRoomInfo`
+- `ChatRoomService.StreamMessages`
+- `ChatRoomService.GetUnreadCount`
+
+## 安全特性
+
+### 密鑰管理
+
+#### Master Key
+- 256-bit AES 密鑰
+- 從環境變量 `MASTER_KEY` 讀取
+- 用於加密所有 Room Key
+- **生產環境必須設置**
+
+生成 Master Key：
+```bash
+export MASTER_KEY=$(openssl rand -base64 32)
+```
+
+#### Room Key
+- 每個聊天室獨立的 256-bit AES 密鑰
+- 首次發送消息時自動生成
+- 用 Master Key 加密後存儲於 MongoDB
+- 支持版本管理和輪替
+
+#### 密鑰輪替
+
+自動輪替（可選）：
+```bash
+export KEY_ROTATION_ENABLED=true
+```
+
+配置策略：
+- 輪替間隔：24 小時（默認）
+- 密鑰最大年齡：30 天（默認）
+- 保留歷史密鑰：5 個版本（默認）
+
+手動輪替：
+```go
+keyManager.ForceRotateKey(roomID)
+```
+
+### 加密實現
+
+#### 消息加密流程
+1. 獲取或創建聊天室密鑰
+2. 使用 AES-256-CTR 加密消息
+3. Base64 編碼密文
+4. 添加前綴 `aes256ctr:`
+5. 存儲到數據庫
+
+#### 消息解密流程
+1. 從數據庫讀取加密消息
+2. 檢查前綴確認加密格式
+3. Base64 解碼
+4. 獲取對應版本的密鑰
+5. AES-256-CTR 解密
+6. 返回明文
+
+#### 系統消息
+系統消息（type=system）不加密，直接存儲明文。
+
+### Rate Limiting
+
+三層限制策略：
+
+1. **全局限制**
+   - 默認：100 請求/分鐘
+
+2. **端點限制**
+   - 發送消息：30 次/分鐘
+   - 創建聊天室：10 次/分鐘
+   - SSE 連接：30 次/分鐘
+
+3. **SSE 連接限制**
+   - 每 IP 最大連接數：5
+   - 連接間隔：1 秒
+   - 全局最大連接數：1000
+
+### 審計日誌
+
+記錄內容：
+- 操作類型（create_room, send_message, etc.）
+- 用戶 ID
+- 聊天室 ID
+- IP 地址
+- User-Agent
+- 時間戳
+- Request ID
+- 操作結果
+
+日誌格式：GCP Cloud Logging JSON
+
+## 開發指南
+
+### 項目結構
 
 ```
 chat-gateway/
 ├── cmd/
-│   ├── api/                    # 應用程式入口
-│   │   └── main.go            # 啟動 gRPC 和 HTTP 服務
-│   └── test/                   # 測試工具
+│   └── api/
+│       └── main.go           # 應用入口
 ├── internal/
-│   ├── grpc/                  # gRPC 服務實現 ⭐ 核心
-│   │   └── server.go          # 聊天室服務邏輯
-│   ├── platform/              # 平台層
-│   │   ├── config/            # 配置管理
-│   │   ├── driver/            # 數據庫驅動 (MongoDB)
-│   │   ├── health/            # 健康檢查
-│   │   ├── logger/            # 日誌管理
-│   │   └── server/            # HTTP 服務器 (API Bridge)
-│   ├── storage/               # 數據存儲層
-│   │   └── database/
-│   │       ├── chatroom/      # 聊天室資料庫操作
-│   │       │   ├── chatroom.go    # 聊天室 CRUD
-│   │       │   ├── message.go     # 消息 CRUD
-│   │       │   └── indexes.go     # 數據庫索引
-│   │       └── repositories.go
-│   ├── security/              # 安全模組
-│   │   ├── encryption/        # 加密實現 (Signal Protocol)
-│   │   └── audit/             # 審計日誌
-│   └── message/               # 消息處理
-├── proto/                     # Protocol Buffers 定義 ⭐
-│   ├── chat.proto            # gRPC 服務定義
-│   └── chat/                 # 生成的 gRPC 代碼
-├── web/                      # 測試用前端 (僅測試)
-│   └── index.html            # 聊天測試介面
-├── scripts/                  # 測試腳本
-│   ├── test_grpc.sh         # gRPC 測試腳本
-│   └── test_chat.sh         # HTTP API 測試腳本
+│   ├── constants/            # 常數定義
+│   ├── grpc/                 # gRPC 服務實現
+│   ├── grpcclient/           # gRPC 客戶端管理
+│   ├── httputil/             # HTTP 工具函數
+│   ├── platform/
+│   │   ├── config/           # 配置管理
+│   │   ├── driver/           # 數據庫驅動
+│   │   ├── health/           # 健康檢查
+│   │   ├── logger/           # 日誌系統
+│   │   ├── middleware/       # 中間件
+│   │   └── server/           # HTTP 服務器
+│   ├── security/
+│   │   ├── audit/            # 審計服務
+│   │   ├── encryption/       # 加密服務
+│   │   └── keymanager/       # 密鑰管理
+│   └── storage/
+│       └── database/
+│           ├── chatroom/     # 聊天室數據訪問
+│           └── security.go   # 數據庫安全
+├── proto/                    # Protocol Buffers 定義
 ├── configs/                  # 配置文件
-│   ├── local.yml            # 本地開發配置
-│   ├── development.yaml     # 開發環境
-│   ├── staging.yaml         # 測試環境
-│   └── production.yaml      # 生產環境
-└── build/                   # 構建配置
-    ├── Dockerfile
-    └── docker-compose.yml
+├── scripts/                  # 工具腳本
+├── web/                      # 測試前端
+└── tests/                    # 測試文件
 ```
 
-## 🚀 快速開始
+### 添加新功能
 
-### 環境要求
+#### 1. 定義 Proto
 
-- Go 1.24+
-- MongoDB 4.4+
-- grpcurl (測試 gRPC 用)
-
-### 1. 安裝依賴
-
-```bash
-# 安裝 Go 依賴
-go mod download
-
-# 安裝 grpcurl (測試 gRPC 用)
-brew install grpcurl  # macOS
-```
-
-### 2. 啟動 MongoDB
-
-```bash
-# 使用 Docker（推薦）
-docker run -d --name mongodb -p 27017:27017 mongo:latest
-
-# 或使用本地 MongoDB
-mongod --dbpath /path/to/your/db
-```
-
-### 3. 配置環境
-
-編輯配置文件 `configs/local.yml`：
-
-```yaml
-server:
-  grpc_port: "8081"   # gRPC 服務端口
-  http_port: "8080"   # HTTP API Bridge 端口
-
-database:
-  mongodb:
-    uri: "mongodb://localhost:27017"
-    database: "chatroom"
-```
-
-### 4. 運行服務
-
-```bash
-# 使用 Air（推薦，支持熱重載）
-air
-
-# 或直接運行
-go run cmd/api/main.go
-
-# 或編譯後運行
-go build -o bin/chat-gateway cmd/api/main.go
-./bin/chat-gateway
-```
-
-服務啟動後：
-- gRPC 服務: `localhost:8081`
-- HTTP API: `localhost:8080`
-- 測試頁面: `http://localhost:8080` (使用 Live Server 打開 `web/index.html`)
-
-### 5. 測試服務
-
-```bash
-# 檢查健康狀態
-curl http://localhost:8080/health
-
-# 運行 gRPC 測試
-./scripts/test_grpc.sh
-
-# 運行 HTTP API 測試
-./scripts/test_chat.sh
-```
-
-## 🧪 測試
-
-### gRPC 測試 (推薦)
-
-```bash
-# 完整測試流程（一對一、群組、消息）
-./scripts/test_grpc.sh
-
-# 測試創建聊天室
-grpcurl -plaintext -import-path proto -proto chat.proto \
-  -d '{
-    "name": "測試聊天室",
-    "type": "group",
-    "owner_id": "user_alice",
-    "member_ids": ["user_alice", "user_bob", "user_charlie"]
-  }' \
-  localhost:8081 chat.ChatRoomService/CreateRoom
-
-# 測試發送消息
-grpcurl -plaintext -import-path proto -proto chat.proto \
-  -d '{
-    "room_id": "YOUR_ROOM_ID",
-    "sender_id": "user_alice",
-    "content": "Hello, World!",
-    "type": "text"
-  }' \
-  localhost:8081 chat.ChatRoomService/SendMessage
-```
-
-### HTTP API 測試 (測試用)
-
-```bash
-# 創建群組
-curl -X POST http://localhost:8080/api/v1/rooms \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "測試群組",
-    "type": "group",
-    "owner_id": "user_alice",
-    "members": [
-      {"user_id": "user_alice", "role": "admin"},
-      {"user_id": "user_bob", "role": "member"}
-    ]
-  }'
-
-# 發送消息
-curl -X POST http://localhost:8080/api/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{
-    "room_id": "YOUR_ROOM_ID",
-    "sender_id": "user_alice",
-    "content": "Hello!",
-    "type": "text"
-  }'
-
-# 獲取消息
-curl "http://localhost:8080/api/v1/messages?room_id=YOUR_ROOM_ID&user_id=user_alice&limit=20"
-```
-
-### Web 測試界面 (僅供測試)
-
-1. 使用 VS Code Live Server 打開 `web/index.html`
-2. 選擇用戶身份（Alice、Bob、Charlie、David）
-3. 點擊聯絡人開始一對一聊天
-4. 或點擊「創建群組」創建群組聊天
-5. 測試消息發送、已讀狀態等功能
-
-> **注意**: 目前使用 HTTP 輪詢（每3秒）獲取新消息，非即時推送。WebSocket 待實現。
-
-## 📊 功能詳解
-
-### 1. 一對一聊天
-
-- **自動防重複**: 系統自動檢測是否已存在兩人之間的聊天室
-- **點擊即聊**: 點擊聯絡人直接開啟聊天，無需手動創建
-- **已讀狀態**: 顯示對方是否已讀你的消息
-
-### 2. 群組聊天
-
-- **成員管理**: 支援添加成員、移除成員、退出群組
-- **已讀統計**: 顯示「N已讀」，統計群組內已讀人數
-- **角色管理**: 支援管理員和普通成員角色
-
-### 3. 消息功能
-
-- **即時發送**: gRPC 高效能消息傳遞
-- **歷史記錄**: MongoDB 持久化儲存
-- **已讀/送達**: 追蹤消息狀態
-- **ID 管理**: 自動生成 MongoDB ObjectID
-- **消息推送**: 目前使用 HTTP 輪詢（每3秒），WebSocket 待實現
-
-### 4. 數據庫設計
-
-```javascript
-// ChatRoom 聊天室
-{
-  _id: ObjectId,
-  id: "string (hex)",
-  name: "聊天室名稱",
-  description: "描述",
-  type: "direct | group",
-  owner_id: "擁有者ID",
-  members: [
-    {
-      user_id: "用戶ID",
-      username: "用戶名",
-      role: "admin | member",
-      joined_at: ISODate,
-      last_seen: ISODate
-    }
-  ],
-  created_at: ISODate,
-  updated_at: ISODate
+編輯 `proto/chat.proto`：
+```protobuf
+service ChatRoomService {
+  rpc YourNewMethod(YourRequest) returns (YourResponse);
 }
 
-// Message 消息
-{
-  _id: ObjectId,
-  id: "string (hex)",
-  room_id: "聊天室ID",
-  sender_id: "發送者ID",
-  content: "消息內容",
-  type: "text | image | file | ...",
-  status: "sent | delivered | read",
-  read_by: [
-    {
-      user_id: "用戶ID",
-      read_at: ISODate
-    }
-  ],
-  delivered_to: [...],
-  created_at: ISODate,
-  updated_at: ISODate
+message YourRequest {
+  string field = 1;
+}
+
+message YourResponse {
+  bool success = 1;
+  string message = 2;
 }
 ```
 
-## 🔐 安全設計
-
-### 已實現
-- ✅ MongoDB 連接安全
-- ✅ 數據驗證
-- ✅ 錯誤處理
-
-### 規劃中
-- ⏳ TLS/SSL 加密傳輸
-- ⏳ 端到端加密 (Signal Protocol)
-- ⏳ JWT 身份驗證
-- ⏳ 審計日誌
-
-## 🐳 Docker 部署
+#### 2. 生成代碼
 
 ```bash
-# 構建鏡像
-cd build
-docker build -t chat-gateway .
-
-# 運行服務
-docker-compose up -d
-
-# 查看日誌
-docker-compose logs -f chat-gateway
+./scripts/generate_proto.sh
 ```
 
-## 📈 性能優化
+#### 3. 實現服務
 
-### 數據庫索引
-
-服務啟動時自動創建索引：
-- `members.user_id` - 用戶聊天室查詢
-- `room_id + created_at` - 消息查詢
-- `sender_id` - 發送者查詢
-- `type` - 消息類型查詢
-
-### 查詢優化
-
-- 使用游標分頁避免深度分頁問題
-- 合理的查詢限制（最大 100 條/次）
-- MongoDB 投影減少網絡傳輸
-
-## 📚 相關文檔
-
-- [快速開始指南](QUICK_START.md)
-- [測試指南](TESTING.md)
-- [gRPC Proto 定義](proto/chat.proto)
-
-## 🔧 開發指南
-
-### 生成 gRPC 代碼
-
-```bash
-# 安裝 protoc 工具
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-# 生成代碼
-protoc --go_out=. --go-grpc_out=. proto/chat.proto
+在 `internal/grpc/server.go` 添加：
+```go
+func (s *Server) YourNewMethod(ctx context.Context, req *chat.YourRequest) (*chat.YourResponse, error) {
+    // 實現邏輯
+    return &chat.YourResponse{
+        Success: true,
+        Message: "success",
+    }, nil
+}
 ```
+
+#### 4. 添加 HTTP 端點（如需要）
+
+在 `internal/platform/server/http.go` 添加路由和處理器。
 
 ### 代碼規範
 
-```bash
-# 格式化代碼
-go fmt ./...
+- 使用 `gofmt` 格式化代碼
+- 函數和類型添加註釋
+- 錯誤處理要完整
+- 使用結構化日誌
+- 敏感信息不要記錄到日誌
 
-# 運行 linter
-golangci-lint run
+### 日誌規範
 
-# 運行測試
-go test ./...
+使用統一的 logger：
+```go
+logger.Info(ctx, "操作描述",
+    logger.WithUserID(userID),
+    logger.WithRoomID(roomID),
+    logger.WithAction("action_name"),
+    logger.WithDetails(map[string]interface{}{
+        "key": "value",
+    }))
 ```
 
-## 🤝 貢獻
+## 測試
 
-歡迎提交 Issue 和 Pull Request！
+參見 `TESTING.md` 和 `TESTING_GUIDE.md` 獲取詳細測試文檔。
 
-## 📄 授權
+### 單元測試
 
-本專案採用 MIT 授權條款。
+```bash
+# 運行所有測試
+go test ./...
 
----
+# 運行特定包的測試
+go test ./internal/security/encryption/...
 
-## 🎯 下一步計劃
+# 查看覆蓋率
+go test -cover ./...
+```
 
-### 高優先級
-- [ ] **添加 WebSocket 支援** (實時消息推送，取代 HTTP 輪詢)
-- [ ] **實現 StreamMessages** (gRPC 流式消息)
-- [ ] **實現 GetUnreadCount** (未讀數量統計)
+### 集成測試
 
-### 中優先級
-- [ ] 添加消息搜索功能
-- [ ] 實現文件上傳/分享
-- [ ] 添加單元測試和集成測試
-- [ ] 性能測試和優化
+```bash
+# 確保 MongoDB 運行
+docker-compose up -d mongo
 
-### 低優先級（規劃中）
-- [ ] 實現端到端加密 (Signal Protocol)
-- [ ] JWT 身份驗證
-- [ ] 審計日誌系統
+# 運行集成測試
+go test -tags=integration ./tests/...
+```
+
+### 手動測試
+
+使用提供的測試前端 `web/index.html` 進行端到端測試。
+
+## 部署
+
+### Docker 部署（TODO）
+
+```bash
+# 構建鏡像
+docker build -t chat-gateway:latest .
+
+# 運行容器
+docker run -d \
+  -p 8080:8080 \
+  -p 8081:8081 \
+  -e MONGO_URI=mongodb://mongo:27017 \
+  -e MASTER_KEY=your_master_key \
+  chat-gateway:latest
+```
+
+### Kubernetes 部署（TODO）
+
+參見 `k8s/` 目錄中的配置文件。
+
+### 生產環境檢查清單
+
+- [ ] 設置 `MASTER_KEY` 環境變量
+- [ ] 配置 MongoDB 認證
+- [ ] 啟用 TLS（gRPC 和 MongoDB）
+- [ ] 配置 CORS 白名單
+- [ ] 設置適當的 Rate Limiting
+- [ ] 啟用審計日誌
+- [ ] 配置日誌收集（Filebeat, Fluentd 等）
+- [ ] 設置監控告警
+- [ ] 定期備份數據庫
+- [ ] 配置密鑰輪替策略
+- [ ] 設置 `GIN_MODE=release`
+
+## 常見問題
+
+### Q: 如何重置所有數據？
+
+```bash
+mongosh
+use chatroom
+db.dropDatabase()
+```
+
+### Q: 消息顯示「訊息格式錯誤」？
+
+原因：Master Key 改變導致無法解密舊消息。
+
+解決：
+1. 使用固定的 Master Key（生產環境必須）
+2. 或清空數據庫重新開始
+
+### Q: SSE 連接一直 429 錯誤？
+
+原因：觸發了 Rate Limiting。
+
+解決：調整 `configs/local.yaml` 中的 SSE 限制：
+```yaml
+limits:
+  sse:
+    min_connection_interval_seconds: 1  # 降低間隔
+    max_connections_per_ip: 10          # 增加限制
+```
+
+### Q: 如何查看密鑰？
+
+```bash
+mongosh
+use chatroom
+db.encryption_keys.find().pretty()
+```
+
+注意：密鑰是加密存儲的，無法直接查看明文。
+
+### Q: 如何手動輪替密鑰？
+
+目前需要通過代碼調用：
+```go
+keyManager.ForceRotateKey(roomID)
+```
+
+未來會添加管理 API。
+
+### Q: 為什麼重啟後可以解密舊消息？
+
+因為密鑰持久化在 MongoDB 中：
+1. 啟動時自動從 DB 加載密鑰
+2. 使用相同的 Master Key 解密 Room Key
+3. 因此可以解密所有歷史消息
+
+## 授權
+
+MIT License
+
+## 聯繫方式
+
+- 問題反饋：提交 Issue
+- 功能建議：提交 Feature Request

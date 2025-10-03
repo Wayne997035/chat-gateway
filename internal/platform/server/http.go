@@ -86,10 +86,10 @@ func Router() *gin.Engine {
 
 	// 添加請求元數據中間件（提取 IP、User-Agent）
 	r.Use(middleware.RequestMetadataMiddleware())
-	
+
 	// 從配置讀取限制參數
 	cfg := config.Get()
-	
+
 	// 添加請求大小限制（防止大文件攻擊）
 	maxMemory := int64(10 << 20) // 默認 10MB
 	if cfg != nil && cfg.Limits.Request.MaxMultipartMemory > 0 {
@@ -103,7 +103,7 @@ func Router() *gin.Engine {
 		defaultLimit = cfg.Limits.RateLimiting.DefaultPerMinute
 	}
 	rateLimiter := middleware.NewPerEndpointRateLimiter(defaultLimit, time.Minute)
-	
+
 	// 為不同端點設置不同的速率限制
 	if cfg != nil && cfg.Limits.RateLimiting.Enabled {
 		if cfg.Limits.RateLimiting.MessagesPerMin > 0 {
@@ -116,10 +116,10 @@ func Router() *gin.Engine {
 			rateLimiter.SetLimit("/api/v1/messages/stream", cfg.Limits.RateLimiting.SSEPerMin, time.Minute)
 		}
 	}
-	
+
 	// 應用 Rate Limiting 中間件
 	r.Use(rateLimiter.Middleware())
-	
+
 	// 創建 SSE 連接限制器
 	sseMaxPerIP := 3
 	sseInterval := 10
@@ -416,7 +416,7 @@ func getMessages(c *gin.Context) {
 	if cfg != nil && cfg.Limits.Pagination.DefaultPageSize > 0 {
 		defaultLimit = int32(cfg.Limits.Pagination.DefaultPageSize)
 	}
-	
+
 	limit := defaultLimit
 	if limitStr != "" {
 		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 32); err == nil {
