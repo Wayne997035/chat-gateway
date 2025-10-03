@@ -30,34 +30,38 @@ func main() {
 // 從環境變量 MASTER_KEY 讀取 base64 編碼的 32 bytes 密鑰
 // 如果未設置，生成臨時隨機密鑰（開發環境）
 func loadMasterKey() ([]byte, error) {
+	ctx := context.Background()
 	masterKeyEnv := os.Getenv("MASTER_KEY")
-	
+
 	if masterKeyEnv != "" {
 		// 從環境變量讀取（base64 解碼）
 		masterKey, err := base64.StdEncoding.DecodeString(masterKeyEnv)
 		if err != nil {
-			return nil, fmt.Errorf("invalid MASTER_KEY format (must be base64): %w", err)
+			logger.Error(ctx, "Master Key 格式錯誤", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+			return nil, fmt.Errorf("invalid master key configuration")
 		}
-		
+
 		// 驗證長度必須是 32 bytes
 		if len(masterKey) != 32 {
-			return nil, fmt.Errorf("MASTER_KEY must be 32 bytes, got %d bytes", len(masterKey))
+			logger.Error(ctx, "Master Key 長度錯誤", logger.WithDetails(map[string]interface{}{"expected": 32, "got": len(masterKey)}))
+			return nil, fmt.Errorf("invalid master key configuration")
 		}
-		
-		fmt.Println("從環境變量載入主密鑰（base64 解碼）")
+
+		logger.Info(ctx, "從環境變量載入主密鑰")
 		return masterKey, nil
 	}
-	
+
 	// 開發環境：生成臨時隨機密鑰
 	masterKey := make([]byte, 32)
 	if _, err := rand.Read(masterKey); err != nil {
-		return nil, fmt.Errorf("failed to generate random master key: %w", err)
+		logger.Error(ctx, "無法生成隨機密鑰", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+		return nil, fmt.Errorf("master key initialization failed")
 	}
-	
-	fmt.Println("開發模式：使用臨時主密鑰（重啟後舊訊息將無法解密）")
-	fmt.Printf("提示：生產環境請設置 MASTER_KEY 環境變量\n")
-	fmt.Printf("生成方式：export MASTER_KEY=$(openssl rand -base64 32)\n")
-	
+
+	logger.Info(ctx, "開發模式：使用臨時主密鑰（重啟後舊訊息將無法解密）")
+	logger.Info(ctx, "提示：生產環境請設置 MASTER_KEY 環境變量")
+	logger.Info(ctx, "生成方式：export MASTER_KEY=$(openssl rand -base64 32)")
+
 	return masterKey, nil
 }
 
@@ -107,21 +111,24 @@ func mainNoExit() error {
 		// 載入主密鑰 (Master Key)
 		masterKey, err := loadMasterKey()
 		if err != nil {
-			return fmt.Errorf("failed to load master key: %w", err)
+			logger.Error(ctx, "無法載入主密鑰", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+			return fmt.Errorf("encryption initialization failed")
 		}
-		
+
 		// 創建帶持久化的密鑰管理器
 		mongoDb := driver.GetMongoDatabase()
 		if mongoDb == nil {
-			return fmt.Errorf("MongoDB database not initialized")
+			logger.Error(ctx, "MongoDB 未初始化", nil)
+			return fmt.Errorf("database initialization failed")
 		}
-		
+
 		keyManager, err = keymanager.NewKeyManagerWithPersistence(masterKey, mongoDb)
 		if err != nil {
-			return fmt.Errorf("failed to create key manager: %w", err)
+			logger.Error(ctx, "密鑰管理器創建失敗", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+			return fmt.Errorf("encryption initialization failed")
 		}
 		logger.Info(ctx, "密鑰管理器初始化成功（已啟用持久化）")
-		
+
 		// 啟用自動密鑰輪換（可選）
 		// 在生產環境中建議啟用
 		if os.Getenv("KEY_ROTATION_ENABLED") == "true" {
@@ -135,7 +142,8 @@ func mainNoExit() error {
 	// 啟動 gRPC 服務器
 	grpcServer, err := grpc.NewServer(repos, encryptionEnabled, auditEnabled, keyManager, cfg.Security.TLS)
 	if err != nil {
-		return fmt.Errorf("failed to create gRPC server: %w", err)
+		logger.Error(ctx, "gRPC 服務器創建失敗", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+		return fmt.Errorf("server initialization failed")
 	}
 	go func() {
 		logger.Info(ctx, "正在啟動 gRPC 聊天室服務...", logger.WithAction("start_grpc"))

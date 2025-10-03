@@ -1,7 +1,7 @@
 [build]
 cmd = "go build -o chat_gateway ./cmd/api"
 bin = "./chat_gateway"
-full_bin = "CONFIG_PATH=./configs/local.yaml LOG_PATH=./logs ./chat_gateway"
+full_bin = "CONFIG_PATH=./configs/local.yaml LOG_PATH=./logs MASTER_KEY=vMlVYuWaOgDObDYpCZvfaQZYXffrJINW+ZBj1Sw3iyE= ./chat_gateway"
 include_ext = ["go"]
 exclude_dir = ["vendor", "node_modules", "tmp", "build", "logs"]
 delay = 1000              # Delay 1 second after file changes before building

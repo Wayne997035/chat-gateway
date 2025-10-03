@@ -516,6 +516,28 @@ func (s *Server) ListUserRooms(ctx context.Context, req *chat.ListUserRoomsReque
 			lastMessageTime = room.LastMessageTime.Unix()
 		}
 
+		// 解密 last_message（如果已加密）
+		lastMessage := room.LastMessage
+		if lastMessage != "" && s.encryption.IsEncrypted(lastMessage) {
+			decryptedLastMessage, err := s.encryption.DecryptMessage(lastMessage, room.ID)
+			if err != nil {
+				logger.Error(ctx, "解密 last_message 失敗",
+					logger.WithRoomID(room.ID),
+					logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+				// 解密失敗，顯示通用訊息
+				lastMessage = "[訊息]"
+			} else {
+				// 確保是有效的 UTF-8（防止 gRPC 序列化錯誤）
+				if !isValidUTF8(decryptedLastMessage) {
+					logger.Warning(ctx, "last_message 包含無效的 UTF-8 字符",
+						logger.WithRoomID(room.ID))
+					lastMessage = "[訊息]"
+				} else {
+					lastMessage = decryptedLastMessage
+				}
+			}
+		}
+
 		grpcRooms[i] = &chat.ChatRoom{
 			Id:              room.ID,
 			Name:            room.Name,
@@ -524,7 +546,7 @@ func (s *Server) ListUserRooms(ctx context.Context, req *chat.ListUserRoomsReque
 			Members:         grpcMembers,
 			CreatedAt:       room.CreatedAt.Unix(),
 			UpdatedAt:       room.UpdatedAt.Unix(),
-			LastMessage:     room.LastMessage,
+			LastMessage:     lastMessage,
 			LastMessageTime: lastMessageTime,
 		}
 	}
@@ -583,7 +605,7 @@ func (s *Server) SendMessage(ctx context.Context, req *chat.SendMessageRequest) 
 	}
 
 	// 更新聊天室的最後訊息
-	// 為了 UX，存儲明文預覽（用戶需要在列表中看到內容）
+	// 安全增強：last_message 也加密存儲
 	var lastMessagePreview string
 	switch req.Type {
 	case "text":
@@ -613,8 +635,22 @@ func (s *Server) SendMessage(ctx context.Context, req *chat.SendMessageRequest) 
 		lastMessagePreview = "[訊息]"
 	}
 
+	// 加密 last_message（使用與訊息內容相同的加密方式）
+	// 系統訊息不加密
+	encryptedLastMessage := lastMessagePreview
+	if req.Type != "system" {
+		encryptedLastMessage, err = s.encryption.EncryptMessage(lastMessagePreview, req.RoomId)
+		if err != nil {
+			logger.Error(ctx, "加密 last_message 失敗",
+				logger.WithRoomID(req.RoomId),
+				logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+			// 繼續執行，使用明文（降級處理）
+			encryptedLastMessage = lastMessagePreview
+		}
+	}
+
 	err = s.repos.ChatRoom.Update(ctx, req.RoomId, map[string]interface{}{
-		"last_message":      lastMessagePreview,
+		"last_message":      encryptedLastMessage,
 		"last_message_time": message.CreatedAt,
 		"last_message_at":   message.CreatedAt, // 用於排序的時間戳
 		"updated_at":        message.CreatedAt,
@@ -641,12 +677,27 @@ func (s *Server) SendMessage(ctx context.Context, req *chat.SendMessageRequest) 
 	// 清理並轉換已讀信息（去重、排除發送者）
 	grpcReadBy := cleanReadBy(message.ReadBy, message.SenderID)
 
+	// 解密內容給前端（與 GetMessages 保持一致）
+	responseContent := message.Content
+	if message.Type != "system" {
+		decrypted, err := s.encryption.DecryptMessage(message.Content, message.RoomID)
+		if err != nil {
+			logger.Warning(ctx, "返回消息時解密失敗",
+				logger.WithMessageID(message.GetID()),
+				logger.WithRoomID(message.RoomID),
+				logger.WithDetails(map[string]interface{}{"error": err.Error()}))
+			responseContent = "[解密失敗]"
+		} else {
+			responseContent = decrypted
+		}
+	}
+
 	// 轉換為 gRPC 格式
 	grpcMessage := &chat.ChatMessage{
 		Id:        message.GetID(),
 		RoomId:    message.RoomID,
 		SenderId:  message.SenderID,
-		Content:   message.Content,
+		Content:   responseContent, // 返回解密後的內容
 		Type:      message.Type,
 		CreatedAt: message.CreatedAt.Unix(),
 		UpdatedAt: message.UpdatedAt.Unix(),

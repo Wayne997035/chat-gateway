@@ -64,6 +64,7 @@ secret.txt
 credentials.json
 
 # Build artifacts
+bin/
 build/
 dist/
 *.tar

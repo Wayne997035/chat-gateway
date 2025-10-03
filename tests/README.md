@@ -356,6 +356,45 @@ func TestConcurrentAccess(t *testing.T) {
 go test -race ./...
 ```
 
+### 9. 安全增強測試（2025-10）
+
+測試新增的安全特性：
+
+#### Double-Check Locking 測試
+```go
+func TestDoubleCheckLocking(t *testing.T) {
+    // 測試並發創建密鑰只生成一個
+}
+```
+
+#### 事務測試
+```go
+func TestKeyRotationTransaction(t *testing.T) {
+    // 測試密鑰輪替的原子性
+}
+```
+
+#### 內存清零測試
+```go
+func TestMemoryZeroing(t *testing.T) {
+    // 驗證敏感數據自動清零
+}
+```
+
+#### 防禦性複製測試
+```go
+func TestDefensiveCopy(t *testing.T) {
+    // 測試 Master Key 和密鑰的防禦性複製
+}
+```
+
+#### 錯誤處理測試
+```go
+func TestUnifiedErrorMessages(t *testing.T) {
+    // 驗證統一錯誤消息格式
+}
+```
+
 ## 故障排除
 
 ### 測試失敗時
@@ -430,14 +469,38 @@ go tool cover -html=coverage.out
 
 ## 參考資源
 
-- 主測試文檔：`../TESTING.md`
-- 測試指南：`../TESTING_GUIDE.md`
+- 主項目文檔：`../README.md`
 - Go 測試文檔：https://golang.org/pkg/testing/
 - 測試最佳實踐：https://github.com/golang/go/wiki/TableDrivenTests
+- Go 並發測試：https://go.dev/blog/race-detector
+
+## 安全測試重點（2025-10）
+
+### 密鑰管理安全性
+- 測試 Master Key 的防禦性複製
+- 測試 Room Key 的並發創建（Double-Check Locking）
+- 測試密鑰輪替的原子性（MongoDB 事務）
+- 測試敏感數據的內存清零
+
+### 加密安全性
+- 測試 AES-256-CTR 加密/解密
+- 測試加密後的數據格式
+- 測試 UTF-8 驗證
+- 測試系統消息不加密
+
+### 錯誤處理安全性
+- 測試統一錯誤消息
+- 測試詳細錯誤記錄到日誌
+- 測試不洩露敏感信息
+
+### 並發安全性
+- 使用 `-race` 標誌檢測競態條件
+- 測試高並發場景
+- 測試鎖的正確使用
 
 ## 聯繫
 
 測試相關問題：
 - 提交 Issue
-- 查看測試文檔
+- 查看主文檔 `../README.md`
 - 參考現有測試用例

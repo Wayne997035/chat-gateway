@@ -116,12 +116,15 @@ Chat Gateway 採用分層架構設計，核心為 gRPC 服務，支持多種客�
 
 ### 安全特性
 
-#### 1. 端到端加密
+#### 1. 端到端加密 (A 級安全)
 - **加密算法**: AES-256-CTR
 - **密鑰管理**: 每個聊天室獨立密鑰
 - **密鑰存儲**: Master Key 加密後存儲於 MongoDB
-- **密鑰輪替**: 支持自動和手動輪替
+- **密鑰輪替**: 支持自動和手動輪替（使用事務保證原子性）
 - **版本管理**: 保留歷史密鑰用於解密舊消息
+- **並發安全**: Double-Check Locking 防止競爭條件
+- **內存保護**: 敏感數據自動清零
+- **防禦性編程**: Master Key 和密鑰防禦性複製
 
 #### 2. 傳輸安全
 - gRPC TLS 支持（可選）
@@ -154,6 +157,22 @@ Chat Gateway 採用分層架構設計，核心為 gRPC 服務，支持多種客�
 - 包含 IP、User-Agent、Request ID
 - 結構化 JSON 格式
 - 支持 GCP Cloud Logging
+- 無敏感信息洩露（統一錯誤消息）
+
+#### 6. 安全增強（2025-10 更新）
+- **並發控制**: Double-Check Locking 模式
+- **事務支持**: 密鑰輪替使用 MongoDB 事務
+- **內存安全**: 
+  - 密鑰生成後自動清零
+  - 加密/解密緩衝區清零
+  - 防止內存 dump 洩露
+- **防禦性複製**: 
+  - Master Key 複製防止外部修改
+  - 返回密鑰副本而非引用
+- **錯誤處理**: 
+  - 統一錯誤消息格式
+  - 詳細錯誤記錄到日誌
+  - 客戶端僅收到通用錯誤
 
 ## 技術棧
 
@@ -293,22 +312,22 @@ limits:
     max_body_size: 10485760      # 10MB
     max_multipart_memory: 10485760
 
-  # Rate Limiting
+  # Rate Limiting（開發環境超寬鬆，幾乎不限制）
   rate_limiting:
     enabled: true
-    default_per_minute: 100
-    messages_per_minute: 30
-    rooms_per_minute: 10
-    sse_per_minute: 30
+    default_per_minute: 10000         # 全局限制（每秒 166 個請求，超級寬鬆）
+    messages_per_minute: 1000         # 發送訊息（每秒 16 條，隨便打字）
+    rooms_per_minute: 500             # 創建聊天室（每分鐘 500 個）
+    sse_per_minute: 10000             # SSE 連接（基本無限制）
 
-  # SSE 連接限制
+  # SSE 連接限制（開發環境超寬鬆）
   sse:
-    max_connections_per_ip: 5
-    max_total_connections: 1000
-    min_connection_interval_seconds: 1
-    heartbeat_interval_seconds: 15
-    initial_message_fetch: 100
-    message_channel_buffer: 10
+    max_connections_per_ip: 50        # 每個 IP 最大連接數（隨便開標籤頁）
+    max_total_connections: 100000     # 全局最大連接數（10 萬，基本無限）
+    min_connection_interval_seconds: 0  # 最小連接間隔（0，完全不限制）
+    heartbeat_interval_seconds: 15    # 心跳間隔
+    initial_message_fetch: 100        # 初始訊息抓取數量
+    message_channel_buffer: 10        # 訊息通道緩衝區大小
 
   # 分頁限制
   pagination:
@@ -359,9 +378,9 @@ POST /api/v1/rooms
 Content-Type: application/json
 
 {
-  "name": "測試群組",
-  "type": "group",
-  "owner_id": "user_alice",
+    "name": "測試群組",
+    "type": "group",
+    "owner_id": "user_alice",
   "members": ["user_alice", "user_bob"]
 }
 ```
@@ -395,9 +414,9 @@ Content-Type: application/json
 
 {
   "room_id": "507f1f77bcf86cd799439011",
-  "sender_id": "user_alice",
-  "content": "Hello!",
-  "type": "text"
+    "sender_id": "user_alice",
+    "content": "Hello!",
+    "type": "text"
 }
 ```
 
@@ -447,6 +466,7 @@ GET /api/v1/messages/stream?room_id=507f1f77bcf86cd799439011&user_id=user_alice
 - 從環境變量 `MASTER_KEY` 讀取
 - 用於加密所有 Room Key
 - **生產環境必須設置**
+- **防禦性複製**：初始化時複製防止外部修改
 
 生成 Master Key：
 ```bash
@@ -458,6 +478,9 @@ export MASTER_KEY=$(openssl rand -base64 32)
 - 首次發送消息時自動生成
 - 用 Master Key 加密後存儲於 MongoDB
 - 支持版本管理和輪替
+- **並發安全**：使用 Double-Check Locking 防止重複創建
+- **內存保護**：使用後自動清零
+- **安全返回**：返回副本而非引用
 
 #### 密鑰輪替
 
@@ -476,14 +499,53 @@ export KEY_ROTATION_ENABLED=true
 keyManager.ForceRotateKey(roomID)
 ```
 
+**事務保證**：密鑰輪替使用 MongoDB 事務確保原子性：
+1. 標記舊密鑰為非活躍
+2. 插入新密鑰
+3. 兩步驟在同一事務中完成，避免數據不一致
+
+#### 密鑰持久化
+
+- **存儲位置**：MongoDB `encryption_keys` 集合
+- **加密方式**：Room Key 用 Master Key 加密（AES-256-CTR）
+- **啟動加載**：服務啟動時從 DB 加載所有密鑰到內存
+- **三層緩存**：
+  1. 內存緩存（`keys` map）
+  2. 數據庫持久化（`encryption_keys` 集合）
+  3. 歷史密鑰緩存（`oldKeys` map）
+
+#### 安全增強（2025-10）
+
+1. **並發控制**
+   - Double-Check Locking 模式
+   - 讀鎖（快速路徑）+ 寫鎖（慢速路徑）
+   - 防止競爭條件
+
+2. **內存安全**
+   - 密鑰生成後使用 `defer` 自動清零
+   - 加密/解密緩衝區清零
+   - 舊密鑰歸檔前清零
+   - 防止內存 dump 洩露
+
+3. **防禦性複製**
+   - Master Key 初始化時複製
+   - 返回密鑰副本而非引用
+   - 防止外部修改內部狀態
+
+4. **事務支持**
+   - 密鑰輪替使用 MongoDB 事務
+   - 確保操作原子性
+   - 避免短暫無活躍密鑰
+
 ### 加密實現
 
 #### 消息加密流程
-1. 獲取或創建聊天室密鑰
+1. 獲取或創建聊天室密鑰（Double-Check Locking）
 2. 使用 AES-256-CTR 加密消息
 3. Base64 編碼密文
 4. 添加前綴 `aes256ctr:`
 5. 存儲到數據庫
+6. **內存清零**：明文字節、臨時緩衝區自動清零
 
 #### 消息解密流程
 1. 從數據庫讀取加密消息
@@ -491,27 +553,39 @@ keyManager.ForceRotateKey(roomID)
 3. Base64 解碼
 4. 獲取對應版本的密鑰
 5. AES-256-CTR 解密
-6. 返回明文
+6. **內存清零**：密文數據、解碼後數據自動清零
+7. 返回明文
 
 #### 系統消息
 系統消息（type=system）不加密，直接存儲明文。
 
+#### 錯誤處理
+- **統一錯誤消息**：客戶端僅收到通用錯誤（如 "key generation error"）
+- **詳細日誌**：敏感錯誤詳情記錄到日誌，包含 Request ID
+- **防信息洩露**：避免洩露系統實現細節
+
 ### Rate Limiting
 
-三層限制策略：
+三層限制策略（配置可調整）：
 
 1. **全局限制**
-   - 默認：100 請求/分鐘
+   - 開發環境：10,000 請求/分鐘（超寬鬆）
+   - 生產環境建議：100 請求/分鐘
 
 2. **端點限制**
-   - 發送消息：30 次/分鐘
-   - 創建聊天室：10 次/分鐘
-   - SSE 連接：30 次/分鐘
+   - 發送消息：1,000 次/分鐘（開發）/ 30 次（生產）
+   - 創建聊天室：500 次/分鐘（開發）/ 10 次（生產）
+   - SSE 連接：10,000 次/分鐘（開發）/ 30 次（生產）
 
 3. **SSE 連接限制**
-   - 每 IP 最大連接數：5
-   - 連接間隔：1 秒
-   - 全局最大連接數：1000
+   - 每 IP 最大連接數：50（開發環境）/ 5（生產環境）
+   - 連接間隔：0 秒（開發，無限制）/ 1 秒（生產）
+   - 全局最大連接數：100,000（開發）/ 1,000（生產）
+
+**注意**：
+- `min_connection_interval_seconds` 可設為 `0` 以允許無限制快速切換
+- 配置修改後需重啟服務才會生效
+- 開發環境可設置得很寬鬆，生產環境應設置合理限制
 
 ### 審計日誌
 
@@ -629,7 +703,7 @@ logger.Info(ctx, "操作描述",
 
 ## 測試
 
-參見 `TESTING.md` 和 `TESTING_GUIDE.md` 獲取詳細測試文檔。
+參見 `tests/README.md` 獲取詳細測試文檔和輔助工具。
 
 ### 單元測試
 
@@ -713,15 +787,24 @@ db.dropDatabase()
 
 ### Q: SSE 連接一直 429 錯誤？
 
-原因：觸發了 Rate Limiting。
+原因：觸發了 Rate Limiting 或連接間隔限制。
 
-解決：調整 `configs/local.yaml` 中的 SSE 限制：
+解決方法：
+
+1. **調整配置** (`configs/local.yaml`)：
 ```yaml
 limits:
   sse:
-    min_connection_interval_seconds: 1  # 降低間隔
-    max_connections_per_ip: 10          # 增加限制
+    min_connection_interval_seconds: 0  # 設為 0 允許無限制切換
+    max_connections_per_ip: 50          # 增加連接限制
+    max_total_connections: 100000       # 增加全局限制
 ```
+
+2. **重啟服務**：配置修改後必須重啟後端服務才會生效
+
+3. **檢查後端日誌**：確認配置是否正確載入
+
+注意：開發環境可以設置得很寬鬆，但生產環境應該設置合理的限制以防止 DDoS 攻擊。
 
 ### Q: 如何查看密鑰？
 

@@ -120,20 +120,19 @@ func Router() *gin.Engine {
 	// 應用 Rate Limiting 中間件
 	r.Use(rateLimiter.Middleware())
 
-	// 創建 SSE 連接限制器
-	sseMaxPerIP := 3
-	sseInterval := 10
-	sseMaxTotal := 1000
+	// 創建 SSE 連接限制器（從配置讀取，支持 0 值）
+	sseMaxPerIP := 50     // 默認值
+	sseInterval := 0      // 默認值（0 表示不限制間隔）
+	sseMaxTotal := 100000 // 默認值
+	if cfg != nil && cfg.Limits.SSE.MaxConnectionsPerIP > 0 {
+		sseMaxPerIP = cfg.Limits.SSE.MaxConnectionsPerIP
+	}
 	if cfg != nil {
-		if cfg.Limits.SSE.MaxConnectionsPerIP > 0 {
-			sseMaxPerIP = cfg.Limits.SSE.MaxConnectionsPerIP
-		}
-		if cfg.Limits.SSE.MinConnectionInterval > 0 {
-			sseInterval = cfg.Limits.SSE.MinConnectionInterval
-		}
-		if cfg.Limits.SSE.MaxTotalConnections > 0 {
-			sseMaxTotal = cfg.Limits.SSE.MaxTotalConnections
-		}
+		// MinConnectionInterval 允許為 0（表示不限制切換速度）
+		sseInterval = cfg.Limits.SSE.MinConnectionInterval
+	}
+	if cfg != nil && cfg.Limits.SSE.MaxTotalConnections > 0 {
+		sseMaxTotal = cfg.Limits.SSE.MaxTotalConnections
 	}
 	sseLimiter := middleware.NewSSEConnectionLimiter(sseMaxPerIP, time.Duration(sseInterval)*time.Second, sseMaxTotal)
 
@@ -381,6 +380,15 @@ func sendMessage(c *gin.Context) {
 	resp, err := client.SendMessage(context.Background(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
+		return
+	}
+
+	// 檢查響應是否成功
+	if !resp.Success || resp.ChatMessage == nil {
+		c.JSON(500, gin.H{
+			"success": false,
+			"message": resp.Message,
+		})
 		return
 	}
 

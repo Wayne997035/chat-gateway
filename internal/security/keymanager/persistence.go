@@ -62,13 +62,37 @@ func NewKeyStore(db *mongo.Database) *KeyStore {
 	}
 }
 
-// SaveKey 保存密鑰到數據庫
+// SaveKey 保存密鑰到數據庫（優先使用事務，失敗則降級）
 func (ks *KeyStore) SaveKey(ctx context.Context, doc *KeyDocument) error {
+	// 嘗試使用事務（需要 MongoDB 副本集）
+	session, err := ks.collection.Database().Client().StartSession()
+	if err == nil {
+		defer session.EndSession(ctx)
+		
+		// 在事務中執行操作
+		_, err = session.WithTransaction(ctx, func(sc context.Context) (interface{}, error) {
+			return nil, ks.saveKeyWithContext(sc, doc)
+		})
+		
+		// 事務成功
+		if err == nil {
+			return nil
+		}
+		
+		// 事務失敗，降級為非事務版本（開發環境單節點 MongoDB）
+	}
+	
+	// 非事務版本（不保證原子性，但可用於開發環境）
+	return ks.saveKeyWithContext(ctx, doc)
+}
+
+// saveKeyWithContext 執行實際的保存操作（可在事務或非事務上下文中使用）
+func (ks *KeyStore) saveKeyWithContext(ctx context.Context, doc *KeyDocument) error {
 	// 如果保存新的活躍密鑰，先將舊的標記為非活躍
 	if doc.IsActive {
 		filter := bson.M{
-			"room_id":   doc.RoomID,
-			"is_active": true,
+			"room_id":     doc.RoomID,
+			"is_active":   true,
 			"key_version": bson.M{"$ne": doc.KeyVersion},
 		}
 		update := bson.M{

@@ -26,8 +26,12 @@ func NewAESCTREncryption(key []byte) (*AESCTREncryption, error) {
 		return nil, fmt.Errorf("key must be 32 bytes (256 bits), got %d bytes", len(key))
 	}
 	
+	// 防禦性複製密鑰（安全增強）
+	keyCopy := make([]byte, len(key))
+	copy(keyCopy, key)
+	
 	return &AESCTREncryption{
-		key: key,
+		key: keyCopy,
 	}, nil
 }
 
@@ -46,6 +50,13 @@ func (e *AESCTREncryption) Encrypt(plaintext string) (string, error) {
 	
 	// 將明文轉為字節
 	plaintextBytes := []byte(plaintext)
+	
+	// 使用完後清零明文字節（安全增強）
+	defer func() {
+		for i := range plaintextBytes {
+			plaintextBytes[i] = 0
+		}
+	}()
 	
 	// 創建密文緩衝區（與明文同樣大小）
 	ciphertext := make([]byte, len(plaintextBytes))
@@ -67,6 +78,16 @@ func (e *AESCTREncryption) Encrypt(plaintext string) (string, error) {
 	result := make([]byte, aes.BlockSize+len(ciphertext))
 	copy(result[:aes.BlockSize], iv)
 	copy(result[aes.BlockSize:], ciphertext)
+	
+	// 使用完後清零臨時緩衝區（安全增強）
+	defer func() {
+		for i := range result {
+			result[i] = 0
+		}
+		for i := range ciphertext {
+			ciphertext[i] = 0
+		}
+	}()
 	
 	// Base64 編碼以便存儲和傳輸
 	encoded := base64.StdEncoding.EncodeToString(result)
@@ -92,6 +113,13 @@ func (e *AESCTREncryption) Decrypt(encryptedText string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %w", err)
 	}
+	
+	// 使用完後清零（安全增強）
+	defer func() {
+		for i := range data {
+			data[i] = 0
+		}
+	}()
 	
 	// 檢查數據長度（至少要有 IV）
 	if len(data) < aes.BlockSize {

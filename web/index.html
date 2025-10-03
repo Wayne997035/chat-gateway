@@ -1476,9 +1476,16 @@
 
         // 連接 WebSocket（暫時禁用）
         function connectWebSocket(roomId) {
+            // 清除任何待處理的重試（防止累積重試）
+            if (window.sseRetryTimer) {
+                clearTimeout(window.sseRetryTimer);
+                window.sseRetryTimer = null;
+            }
+            
             // 關閉舊的 SSE 連接
             if (window.eventSource) {
                 window.eventSource.close();
+                window.eventSource = null;
             }
             
             // 清除舊的輪詢定時器
@@ -1492,6 +1499,8 @@
             
             window.eventSource.onopen = function() {
                 updateStatus('已連接', 'connected');
+                // 連接成功，清除重試計數
+                window.sseRetryCount = 0;
             };
             
             // 監聽連接確認事件
@@ -1544,14 +1553,27 @@
                 // 關閉舊連接
                 if (window.eventSource) {
                     window.eventSource.close();
+                    window.eventSource = null;
                 }
                 
-                // 5秒後重新連接
-                setTimeout(() => {
-                    if (currentRoom && currentRoom.id === roomId) {
-                        connectWebSocket(roomId);
+                // 只有在還在同一個聊天室時才重試（避免切換聊天室時累積重試）
+                if (currentRoom && currentRoom.id === roomId) {
+                    // 初始化重試計數
+                    if (!window.sseRetryCount) {
+                        window.sseRetryCount = 0;
                     }
-                }, 5000);
+                    window.sseRetryCount++;
+                    
+                    // 指數退避：1秒、2秒、4秒、8秒，最多 10 秒
+                    const retryDelay = Math.min(1000 * Math.pow(2, window.sseRetryCount - 1), 10000);
+                    
+                    // 設置重試定時器（使用全局變量以便清除）
+                    window.sseRetryTimer = setTimeout(() => {
+                        if (currentRoom && currentRoom.id === roomId) {
+                            connectWebSocket(roomId);
+                        }
+                    }, retryDelay);
+                }
             };
         }
 
