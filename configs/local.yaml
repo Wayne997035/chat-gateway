@@ -1,0 +1,119 @@
+app:
+  name: "chat-gateway"
+  version: "1.0.0"
+  debug: true
+
+server:
+  host: "localhost"
+  port: "8080"
+  timeout: 30
+  use_https: false
+  cert_path: ""
+  key_path: ""
+
+grpc:
+  host: "localhost"
+  port: "8081"
+
+database:
+  mongo:
+    url: "mongodb://localhost:27017/chatroom"
+    database: "chatroom"
+    username: "" # 從環境變量 MONGO_USERNAME 讀取
+    password: "" # 從環境變量 MONGO_PASSWORD 讀取
+    max_pool_size: 100
+    min_pool_size: 5
+    max_conn_idle_time: 30
+    connect_timeout: 10
+    server_selection_timeout: 5
+    # MongoDB TLS 設定
+    tls_enabled: false # 開發環境可關閉，生產環境建議啟用
+    tls_ca_file: "" # CA 證書路徑
+    tls_cert_file: "" # 客戶端證書路徑（雙向 TLS）
+    tls_key_file: "" # 客戶端私鑰路徑（雙向 TLS）
+    tls_insecure_skip_verify: false # 跳過證書驗證（僅開發環境）
+
+log:
+  rotation_time_hours: 24
+  max_age_days: 7
+  max_size_mb: 100
+
+security:
+  # TLS 設定
+  tls:
+    enabled: false # 開發環境可關閉，生產環境必須開啟
+    cert_file: "certs/server.crt"
+    key_file: "certs/server.key"
+    ca_file: ""
+
+  # JWT 認證（等待 user 服務實現）
+  authentication:
+    jwt_enabled: false # 目前不啟用
+    jwt_secret: "" # 從環境變量 JWT_SECRET 讀取
+    expiration: "15m"
+
+  # 消息加密
+  encryption:
+    enabled: true # 啟用消息加密
+    algorithm: "AES-256-GCM"
+    key_length: 256
+
+  # 審計日誌
+  audit:
+    enabled: true # 啟用審計日誌
+    level: "INFO"
+
+  # 數據保護
+  data_protection:
+    encryption_at_rest: true
+    encryption_in_transit: true
+
+# 限制配置
+limits:
+  # 請求限制
+  request:
+    max_body_size: 10485760 # 10MB
+    max_multipart_memory: 10485760 # 10MB
+
+  # Rate Limiting（開發環境超寬鬆，幾乎不限制）
+  rate_limiting:
+    enabled: true
+    default_per_minute: 10000 # 全局限制（每秒 166 個請求，超級寬鬆）
+    messages_per_minute: 1000 # 發送訊息（每秒 16 條，隨便打字）
+    rooms_per_minute: 500 # 創建聊天室（每分鐘 500 個）
+    sse_per_minute: 10000 # SSE 連接（基本無限制）
+    cleanup_interval_minutes: 10 # 清理間隔
+
+  # SSE 連接限制（開發環境無限制，極致體驗）
+  sse:
+    max_connections_per_ip: 50 # 每個 IP 最大連接數（50 個，隨便開標籤頁）
+    max_total_connections: 100000 # 全局最大連接數（10 萬，基本無限）
+    min_connection_interval_seconds: 0 # 最小連接間隔（0，完全不限制）
+    heartbeat_interval_seconds: 15 # 心跳間隔
+    cleanup_interval_minutes: 10 # 清理間隔
+    initial_message_fetch: 100 # 初始訊息抓取數量
+    message_channel_buffer: 10 # 訊息通道緩衝區大小
+
+  # 分頁限制
+  pagination:
+    default_page_size: 20 # 默認分頁大小
+    max_page_size: 100 # 最大分頁大小
+    max_history_size: 50 # 歷史訊息最大數量
+
+  # 聊天室限制
+  room:
+    max_members: 1000 # 最大成員數
+    max_name_length: 100 # 名稱最大長度
+
+  # 訊息限制
+  message:
+    max_length: 10000 # 訊息最大長度
+    channel_buffer: 10 # Channel buffer 大小
+
+  # MongoDB 查詢限制
+  mongodb:
+    default_query_limit: 20 # 默認查詢數量
+    max_query_limit: 100 # 最大查詢數量
+    max_history_limit: 50 # 歷史查詢最大數量
+    user_rooms_limit: 100 # 用戶聊天室列表限制
+    max_stream_messages: 1000 # 流式訊息最大數量

@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-
+api
+chat_gateway
 # Test binary, built with `go test -c`
 *.test
 
@@ -46,10 +47,8 @@ logs/
 *.env
 
 # Sensitive configuration files
-configs/*local*.yaml
 configs/*prod*.yaml
 configs/*production*.yaml
-configs/*.local.yaml
 configs/*.prod.yaml
 configs/*.production.yaml
 
