@@ -31,11 +31,7 @@ func ConnectMongo() error {
 
 // InitMongo 初始化 MongoDB 連接.
 func InitMongo(cfg config.MongoConfig) error {
-	logger.LogInfof("=== 開始連接 MongoDB ===")
-	logger.LogInfof("MongoDB URL: %s", maskPassword(cfg.URL))
-	logger.LogInfof("MongoDB Database: %s", cfg.Database)
-	logger.LogInfof("MongoDB Username: %s", cfg.Username)
-	logger.LogInfof("MongoDB TLS Enabled: %v", cfg.TLSEnabled)
+	logger.LogInfof("[MongoDB] 連接中... %s", maskPassword(cfg.URL))
 	
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ConnectTimeout)*time.Second)
 	defer cancel()
@@ -50,9 +46,6 @@ func InitMongo(cfg config.MongoConfig) error {
 			Password: cfg.Password,
 		}
 		clientOptions.SetAuth(credential)
-		logger.LogInfof("MongoDB 使用認證連接")
-	} else {
-		logger.LogInfof("MongoDB 使用無認證連接（開發環境）")
 	}
 
 	// 如果啟用 TLS，配置 TLS
@@ -62,7 +55,6 @@ func InitMongo(cfg config.MongoConfig) error {
 			return fmt.Errorf("failed to load MongoDB TLS config: %w", err)
 		}
 		clientOptions.SetTLSConfig(tlsConfig)
-		logger.LogInfof("MongoDB TLS 已啟用")
 	}
 
 	clientOptions.SetMaxPoolSize(uint64(cfg.MaxPoolSize))
@@ -84,7 +76,7 @@ func InitMongo(cfg config.MongoConfig) error {
 	mongoClient = client
 	mongoDB = client.Database(cfg.Database)
 
-	logger.LogInfof("MongoDB connected successfully")
+	logger.LogInfof("[MongoDB] 連接成功")
 	return nil
 }
 
@@ -121,9 +113,9 @@ func loadMongoTLSConfig(cfg config.MongoConfig) (*tls.Config, error) {
 
 	// 如果設置了跳過驗證（僅開發環境）
 	if cfg.TLSInsecureSkipVerify {
-		tlsConfig.InsecureSkipVerify = true
-		logger.LogInfof("⚠️  MongoDB TLS 證書驗證已跳過（僅開發環境）")
-		return tlsConfig, nil
+	tlsConfig.InsecureSkipVerify = true
+	logger.LogInfof("[WARNING] MongoDB TLS 證書驗證已跳過（僅開發環境）")
+	return tlsConfig, nil
 	}
 
 	// 載入 CA 證書

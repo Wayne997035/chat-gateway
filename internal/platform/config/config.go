@@ -324,68 +324,49 @@ func GetMongoURL() string {
 
 // overrideMongoConfigFromEnv 從環境變數覆蓋 MongoDB 設定
 func overrideMongoConfigFromEnv(cfg *Config) {
-	log.Println("=== MongoDB 設定載入開始 ===")
-	log.Printf("配置檔 MongoDB URL: %s", cfg.Database.Mongo.URL)
-	
 	// MongoDB URL（按優先順序檢查多種命名格式）
-	// 1. MONGODB_URI - Render 和其他 PaaS 的標準命名
-	// 2. MONGO_URL - 常見的替代命名
-	// 3. mongoURL - 向後兼容（配置檔中使用的格式）
 	if mongoURL := os.Getenv("MONGODB_URI"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("✓ MongoDB URL 已從環境變數 MONGODB_URI 覆蓋: %s", maskMongoURL(mongoURL))
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
 	} else if mongoURL := os.Getenv("MONGO_URL"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("✓ MongoDB URL 已從環境變數 MONGO_URL 覆蓋: %s", maskMongoURL(mongoURL))
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
 	} else if mongoURL := os.Getenv("mongoURL"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("✓ MongoDB URL 已從環境變數 mongoURL 覆蓋: %s", maskMongoURL(mongoURL))
-	} else {
-		log.Println("⚠️  環境變數 MONGODB_URI、MONGO_URL、mongoURL 都未設定，使用配置檔的值")
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
 	}
-	
-	log.Printf("最終 MongoDB URL: %s", maskMongoURL(cfg.Database.Mongo.URL))
 
 	// MongoDB 資料庫名稱
 	if mongoDB := os.Getenv("MONGO_DATABASE"); mongoDB != "" {
 		cfg.Database.Mongo.Database = mongoDB
-		log.Println("MongoDB 資料庫名稱已從環境變數覆蓋")
 	}
 
 	// MongoDB 使用者名稱
 	if mongoUsername := os.Getenv("MONGO_USERNAME"); mongoUsername != "" {
 		cfg.Database.Mongo.Username = mongoUsername
-		log.Println("MongoDB 使用者名稱已從環境變數覆蓋")
 	}
 
 	// MongoDB 密碼
 	if mongoPassword := os.Getenv("MONGO_PASSWORD"); mongoPassword != "" {
 		cfg.Database.Mongo.Password = mongoPassword
-		log.Println("MongoDB 密碼已從環境變數覆蓋")
 	}
 
 	// TLS 相關設定
 	if tlsEnabled := os.Getenv("MONGO_TLS_ENABLED"); tlsEnabled != "" {
 		cfg.Database.Mongo.TLSEnabled = tlsEnabled == "true" || tlsEnabled == "1"
-		log.Printf("MongoDB TLS 狀態已從環境變數覆蓋: %v", cfg.Database.Mongo.TLSEnabled)
 	}
 
 	if tlsCAFile := os.Getenv("MONGO_TLS_CA_FILE"); tlsCAFile != "" {
 		cfg.Database.Mongo.TLSCAFile = tlsCAFile
-		log.Println("MongoDB TLS CA 檔案路徑已從環境變數覆蓋")
 	}
 
 	if tlsCertFile := os.Getenv("MONGO_TLS_CERT_FILE"); tlsCertFile != "" {
 		cfg.Database.Mongo.TLSCertFile = tlsCertFile
-		log.Println("MongoDB TLS 證書檔案路徑已從環境變數覆蓋")
 	}
 
 	if tlsKeyFile := os.Getenv("MONGO_TLS_KEY_FILE"); tlsKeyFile != "" {
 		cfg.Database.Mongo.TLSKeyFile = tlsKeyFile
-		log.Println("MongoDB TLS 金鑰檔案路徑已從環境變數覆蓋")
 	}
-	
-	log.Println("=== MongoDB 設定載入完成 ===")
 }
 
 // maskMongoURL 遮蔽 MongoDB URL 中的敏感資訊

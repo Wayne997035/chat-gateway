@@ -33,6 +33,11 @@ func loadMasterKey() ([]byte, error) {
 	ctx := context.Background()
 	masterKeyEnv := os.Getenv("MASTER_KEY")
 
+	logger.Info(ctx, "=== 檢查 MASTER_KEY 環境變量 ===", logger.WithDetails(map[string]interface{}{
+		"exists": masterKeyEnv != "",
+		"length": len(masterKeyEnv),
+	}))
+
 	if masterKeyEnv != "" {
 		// 從環境變量讀取（base64 解碼）
 		masterKey, err := base64.StdEncoding.DecodeString(masterKeyEnv)
@@ -47,7 +52,13 @@ func loadMasterKey() ([]byte, error) {
 			return nil, fmt.Errorf("invalid master key configuration")
 		}
 
-		logger.Info(ctx, "從環境變量載入主密鑰")
+		// 遮罩顯示（只顯示前4個字元，其餘用*代替）
+		masked := fmt.Sprintf("%x****", masterKey[:2])
+		logger.Info(ctx, "[SUCCESS] 成功從環境變量載入主密鑰", logger.WithDetails(map[string]interface{}{
+			"masked": masked,
+			"length": len(masterKey),
+			"source": "MASTER_KEY environment variable",
+		}))
 		return masterKey, nil
 	}
 
@@ -58,8 +69,13 @@ func loadMasterKey() ([]byte, error) {
 		return nil, fmt.Errorf("master key initialization failed")
 	}
 
-	logger.Info(ctx, "開發模式：使用臨時主密鑰（重啟後舊訊息將無法解密）")
-	logger.Info(ctx, "提示：生產環境請設置 MASTER_KEY 環境變量")
+	// 遮罩顯示（只顯示前4個字元，其餘用*代替）
+	masked := fmt.Sprintf("%x****", masterKey[:2])
+	logger.Info(ctx, "[WARNING] 開發模式：使用臨時主密鑰（重啟後舊訊息將無法解密）", logger.WithDetails(map[string]interface{}{
+		"masked": masked,
+		"source": "randomly generated",
+	}))
+	logger.Info(ctx, "[WARNING] 提示：生產環境請設置 MASTER_KEY 環境變量")
 	logger.Info(ctx, "生成方式：export MASTER_KEY=$(openssl rand -base64 32)")
 
 	return masterKey, nil
@@ -79,8 +95,6 @@ func mainNoExit() error {
 	if err := config.Load(); err != nil {
 		return err
 	}
-	logger.Info(ctx, "配置載入成功")
-
 	// 連接資料庫.
 	if err := driver.ConnectMongo(); err != nil {
 		return err
@@ -90,7 +104,6 @@ func mainNoExit() error {
 			logger.Errorf(ctx, "關閉 MongoDB 連接失敗: %v", err)
 		}
 	}()
-	logger.Info(ctx, "MongoDB 連接成功")
 
 	// 設置 MongoDB 連接到 database 包
 	database.SetMongoDB(driver.GetMongoDatabase())
@@ -102,8 +115,6 @@ func mainNoExit() error {
 	cfg := config.Get()
 	encryptionEnabled := cfg.Security.Encryption.Enabled
 	auditEnabled := cfg.Security.Audit.Enabled
-
-	logger.Infof(ctx, "安全配置 - 加密: %v, 審計: %v", encryptionEnabled, auditEnabled)
 
 	// 初始化密鑰管理器（帶持久化）
 	var keyManager *keymanager.KeyManagerWithPersistence
@@ -127,16 +138,12 @@ func mainNoExit() error {
 			logger.Error(ctx, "密鑰管理器創建失敗", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 			return fmt.Errorf("encryption initialization failed")
 		}
-		logger.Info(ctx, "密鑰管理器初始化成功（已啟用持久化）")
 
 		// 啟用自動密鑰輪換（可選）
-		// 在生產環境中建議啟用
 		if os.Getenv("KEY_ROTATION_ENABLED") == "true" {
 			keyManager.StartAutoRotation()
-			logger.Info(ctx, "自動密鑰輪換已啟用")
+			logger.Info(ctx, "[KeyManager] 自動密鑰輪換已啟用")
 		}
-	} else {
-		logger.Info(ctx, "加密已禁用，訊息將以明文存儲")
 	}
 
 	// 啟動 gRPC 服務器
@@ -146,7 +153,6 @@ func mainNoExit() error {
 		return fmt.Errorf("server initialization failed")
 	}
 	go func() {
-		logger.Info(ctx, "正在啟動 gRPC 聊天室服務...", logger.WithAction("start_grpc"))
 		if err := grpcServer.Start("8081"); err != nil {
 			logger.Errorf(ctx, "gRPC 服務器啟動失敗: %v", err)
 		}
@@ -154,7 +160,6 @@ func mainNoExit() error {
 
 	// 啟動 HTTP 服務器（API 橋樑）
 	go func() {
-		logger.Info(ctx, "正在啟動 HTTP API 橋樑...", logger.WithAction("start_http"))
 		if err := server.Start(repos); err != nil {
 			logger.Errorf(ctx, "HTTP 服務器啟動失敗: %v", err)
 		}
@@ -162,7 +167,7 @@ func mainNoExit() error {
 
 	// 等待一下讓服務器啟動
 	time.Sleep(2 * time.Second)
-	logger.Info(ctx, "服務器啟動完成，等待中斷信號...")
+	logger.Info(ctx, "[System] 服務器啟動完成")
 
 	// 等待中斷信號
 	quit := make(chan os.Signal, 1)

@@ -17,7 +17,7 @@ type MessageEncryption struct {
 // NewMessageEncryption 創建消息加密服務
 func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence) *MessageEncryption {
 	if km == nil {
-		log.Println("⚠️  WARNING: KeyManager is nil. Encryption will be disabled.")
+		log.Println("[WARNING] KeyManager is nil. Encryption will be disabled.")
 		enabled = false
 	}
 	
@@ -31,7 +31,7 @@ func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence
 // 使用 AES-256-CTR 加密模式
 func (m *MessageEncryption) EncryptMessage(content string, roomID string) (string, error) {
 	if !m.enabled {
-		log.Println("⚠️  WARNING: Message encryption is DISABLED. Messages are stored in PLAIN TEXT!")
+		log.Println("[WARNING] Message encryption is DISABLED. Messages are stored in PLAIN TEXT!")
 		return "plaintext:" + content, nil
 	}
 	
@@ -82,7 +82,7 @@ func (m *MessageEncryption) DecryptMessage(encryptedContent string, roomID strin
 		}
 		if prefix == "encrypted:" {
 			// 舊的假加密格式，嘗試解碼
-			log.Printf("⚠️  WARNING: Found old fake encryption format for room %s", roomID)
+			log.Printf("[WARNING] Found old fake encryption format for room %s", roomID)
 			return "", fmt.Errorf("old encryption format not supported, message cannot be decrypted")
 		}
 	}
