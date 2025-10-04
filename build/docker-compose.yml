@@ -1,0 +1,26 @@
+services:
+  chat-gateway:
+    image: ${REGISTRY}/${IMAGE_NAME}:${DOCKER_TAG}
+    platform: linux/amd64
+    container_name: chat-gateway
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: 100m
+        max-file: "10"
+    ports:
+      - 8080:8080
+    volumes:
+      - /data/logs/chat-gateway:/app/log
+      - /data/config/chat-gateway:/app/config
+    environment:
+      - CONFIG_PATH=/app/config/production.yaml
+      - APP_VERSION=${DOCKER_TAG}
+      - LOG_PATH=/app/log/
+    networks:
+      - tutk
+
+networks:
+  tutk:
+    external: true

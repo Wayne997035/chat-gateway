@@ -39,12 +39,12 @@ logs/
 *.log
 
 # Environment files
-.env
-.env.local
-.env.development
-.env.test
-.env.production
-*.env
+#.env
+#.env.local
+#.env.development
+#.env.test
+#.env.production
+#*.env
 
 # Sensitive configuration files
 configs/*prod*.yaml
@@ -64,7 +64,6 @@ credentials.json
 
 # Build artifacts
 bin/
-build/
 dist/
 *.tar
 *.zip

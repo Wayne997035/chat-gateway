@@ -1,0 +1,221 @@
+version: "3"
+# 全域靜音：所有 task 都不顯示 cmds 執行過程，只顯示輸出結果
+silent: true
+
+vars:
+  ENV_CONFIG_FILE: "build/.env"
+
+tasks:
+  help:
+    desc: Show help information
+    cmds:
+      - 'echo "chat-gateway - Taskfile"'
+      - 'echo ""'
+      - 'echo "Available tasks:"'
+      - 'echo "  task check                   # Run code quality checks and tests"'
+      - 'echo "  task build                   # Build Docker images (includes check)"'
+      - 'echo "  task deploy ENV=<env>        # Deploy to specified environment"'
+      - 'echo "  task clean                   # Clean Docker images"'
+      - 'echo "  task help                    # Show this help information"'
+      - 'echo "  task info                    # Show environment information"'
+      - 'echo ""'
+      - 'echo "Deployment examples:"'
+      - 'echo "  task deploy ENV=stg          # Deploy to staging environment"'
+      - 'echo "  task deploy ENV=prod         # Deploy to production environment"'
+      - 'echo ""'
+      - 'echo "Environment information:"'
+      - 'echo "  task info                    # Show available environments and IPs"'
+      - 'echo ""'
+      - 'echo "Note: Must specify environment for deployment, no default value"'
+
+  check:
+    desc: Run code quality checks and tests
+    cmds:
+      - 'echo "=== Running comprehensive code quality checks and tests ==="'
+      - 'echo "Current directory: $(pwd)"'
+      # Go vet - 官方靜態分析工具
+      - 'echo "Running go vet..."'
+      - "cd .. && go vet ./..."
+      # Go mod tidy - 整理依賴關係
+      - 'echo "Running go mod tidy..."'
+      - "cd .. && go mod tidy"
+      # Staticcheck - 進階靜態分析
+      - 'echo "Checking if staticcheck is installed..."'
+      - 'if ! command -v staticcheck >/dev/null 2>&1; then echo "Installing staticcheck..."; go install honnef.co/go/tools/cmd/staticcheck@latest; fi'
+      - 'echo "Running staticcheck..."'
+      - "cd .. && staticcheck ./..."
+      # Gosec - 安全性分析
+      - 'echo "Checking if gosec is installed..."'
+      - 'if ! command -v gosec >/dev/null 2>&1; then echo "Installing gosec..."; go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; fi'
+      - 'echo "Running gosec..."'
+      - "cd .. && gosec ./..."
+      # Golangci-lint - 綜合程式碼品質檢查
+      - 'echo "Checking if golangci-lint is installed..."'
+      - 'if ! command -v golangci-lint >/dev/null 2>&1; then echo "Installing golangci-lint..."; go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; fi'
+      - 'echo "Running golangci-lint..."'
+      - "cd .. && golangci-lint run --verbose"
+      # Goconst - 檢測重複字串
+      - 'echo "Checking if goconst is installed..."'
+      - 'if ! command -v goconst >/dev/null 2>&1; then echo "Installing goconst..."; go install github.com/jgautheron/goconst/cmd/goconst@latest; fi'
+      - 'echo "Running goconst..."'
+      - "cd .. && goconst -min-occurrences 3 -min-length 1 -ignore-tests=false ./internal/"
+      - 'echo "All code quality checks completed successfully!"'
+      - 'echo ""'
+      - 'echo "=== Running All Tests ==="'
+      - 'echo "Running all tests with coverage..."'
+      - "cd .. && go test ./... -cover -v"
+      - 'echo "All tests completed successfully!"'
+      - 'echo "=== Code quality checks and tests completed successfully ==="'
+
+  build:
+    desc: Build Docker images
+    cmds:
+      - |
+        # Read DOCKER_TAG from .env
+        DOCKER_TAG=$(grep "^DOCKER_TAG=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        echo "=== Starting Docker image build ==="
+        echo "Version: $DOCKER_TAG"
+        IMAGE_NAME=$(grep "^IMAGE_NAME=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        echo "Image name: $IMAGE_NAME"
+        REGISTRY=$(grep "^REGISTRY=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        echo "=== Cleaning old images ==="
+        docker images | grep $IMAGE_NAME | cut -d" " -f3 | xargs -r docker rmi -f
+        echo "=== Building images ==="
+        docker build -f Dockerfile -t $IMAGE_NAME:$DOCKER_TAG ..
+        echo "=== Tagging registry ==="
+        docker tag $IMAGE_NAME:$DOCKER_TAG $REGISTRY/$IMAGE_NAME:$DOCKER_TAG
+        echo "=== Pushing to registry ==="
+        docker push $REGISTRY/$IMAGE_NAME:$DOCKER_TAG
+        echo "=== Saving tar file ==="
+        mkdir -p images
+        docker save -o ./images/$IMAGE_NAME.tar $REGISTRY/$IMAGE_NAME:$DOCKER_TAG
+        echo "Build completed! Image: $IMAGE_NAME:$DOCKER_TAG"
+
+  deploy:
+    desc: "Deploy to specific environment (usage: task deploy ENV=stg)"
+    cmds:
+      - |
+        # Read configuration from .env (with environment variable override)
+        DOCKER_TAG=${DOCKER_TAG:-$(grep "^DOCKER_TAG=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)}
+        IMAGE_NAME=$(grep "^IMAGE_NAME=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        REGISTRY=$(grep "^REGISTRY=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+
+        echo "=== Local docker-compose files are already using .env variables ==="
+        echo "No need to update local files - they automatically use DOCKER_TAG=$DOCKER_TAG"
+
+        echo "=== Checking environment variables ==="
+        if [ -z "{{.ENV}}" ]; then
+          echo "Error: Must specify deployment environment. Usage: task deploy ENV=<environment>"
+          echo ""
+          echo "Examples:"
+          echo "  task deploy ENV=stg"
+          echo ""
+          echo "Available environments:"
+          sed -n '/^\[\[environments\]\]/,/^\[/p' {{.ENV_CONFIG_FILE}} | grep "^[a-zA-Z]*=" | cut -d"=" -f1
+          echo ""
+          echo "For detailed help, run: task help"
+          exit 1
+        fi
+
+        echo "Starting deployment to environment: {{.ENV}}..."
+
+        DEPLOY_USER=$(grep "^DEPLOY_USER=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        TARGET_IP=$(sed -n '/^\[environments\]/,/^\[/p' {{.ENV_CONFIG_FILE}} | grep "^{{.ENV}}=" | cut -d"=" -f2)
+        PROJECT_NAME=$(grep "^PROJECT_NAME=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+
+        echo "Deploy user: $DEPLOY_USER"
+        echo "Target IP: $TARGET_IP"
+
+        if [ -z "$TARGET_IP" ]; then
+          echo "Error: Environment '{{.ENV}}' not found in configuration"
+          echo "Available environments:"
+          sed -n '/^\[environments\]/,/^\[/p' {{.ENV_CONFIG_FILE}} | grep "^[a-zA-Z]*=" | cut -d"=" -f1
+          echo ""
+          echo "For detailed help, run: task help"
+          exit 1
+        fi
+        if [ -z "$DEPLOY_USER" ]; then
+          echo "Error: Deploy username not found in configuration"
+          exit 1
+        fi
+
+        DEPLOY_DATE=$(date +%Y-%m-%d)
+
+        echo "=== Creating remote directories and uploading files ==="
+        ssh $DEPLOY_USER@$TARGET_IP "mkdir -p /home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE"
+        scp ./images/$IMAGE_NAME.tar $DEPLOY_USER@$TARGET_IP:/home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/
+
+        echo "=== Creating config and log directories ==="
+        ssh $DEPLOY_USER@$TARGET_IP "sudo mkdir -p /data/config/${PROJECT_NAME} /data/logs/${PROJECT_NAME}"
+
+        echo "=== Uploading config and environment files ==="
+        # 根據環境選擇配置文件
+        if [ "{{.ENV}}" = "stg" ]; then
+            CONFIG_FILE="staging.yaml"
+        elif [ "{{.ENV}}" = "prod" ]; then
+            CONFIG_FILE="production.yaml"
+        else
+            CONFIG_FILE="development.yaml"
+        fi
+
+        echo "=== Uploading config file for {{.ENV}} environment: $CONFIG_FILE ==="
+        if [ -f "../configs/$CONFIG_FILE" ]; then
+            echo "Uploading config file..."
+            scp "../configs/$CONFIG_FILE" $DEPLOY_USER@$TARGET_IP:/home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/
+            ssh $DEPLOY_USER@$TARGET_IP "sudo cp /home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/$CONFIG_FILE /data/config/${PROJECT_NAME}/ && sudo chmod 644 /data/config/${PROJECT_NAME}/$CONFIG_FILE"
+        else
+            echo "Error: Config file ../configs/$CONFIG_FILE not found"
+            exit 1
+        fi
+
+        echo "Uploading .env file..."
+        scp ./.env $DEPLOY_USER@$TARGET_IP:/home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/
+        ssh $DEPLOY_USER@$TARGET_IP "sudo cp /home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/.env /data/compose/${PROJECT_NAME}/ && sudo chmod 644 /data/compose/${PROJECT_NAME}/.env"
+
+        echo "=== Executing deployment process ==="
+        ssh $DEPLOY_USER@$TARGET_IP "sudo docker load -i /home/$DEPLOY_USER/chat-gateway-deploy/$DEPLOY_DATE/$IMAGE_NAME.tar"
+
+        echo "=== .env file uploaded to server - docker-compose will use DOCKER_TAG=$DOCKER_TAG automatically ==="
+
+        echo "=== Restarting service with new image ==="
+        ssh $DEPLOY_USER@$TARGET_IP "cd /data/compose/${PROJECT_NAME} && if [ \"\$(pwd)\" != \"/data/compose/${PROJECT_NAME}\" ]; then echo \"Error: Not in correct directory\" && exit 1; fi && sudo docker compose down && sudo docker compose up -d && echo \"Deployment completed!\""
+
+        echo "=== Reloading nginx ==="
+        ssh $DEPLOY_USER@$TARGET_IP "sudo docker exec ng nginx -s reload"
+        echo "Deployment script completed"
+
+  clean:
+    desc: Clean Docker images
+    cmds:
+      - 'echo "Cleaning Docker images..."'
+      - |
+        IMAGE_NAME=$(grep "^IMAGE_NAME=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        docker images | grep $IMAGE_NAME | cut -d" " -f3 | xargs -r docker rmi -f
+      - 'echo "Clean completed"'
+
+  info:
+    desc: Show environment information
+    cmds:
+      - 'echo "Environment Information:"'
+      - |
+        DOCKER_TAG=$(grep "^DOCKER_TAG=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        echo "  Docker Tag: $DOCKER_TAG"
+      - |
+        IMAGE_NAME=$(grep "^IMAGE_NAME=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        REGISTRY=$(grep "^REGISTRY=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)
+        echo "  Image Name: $IMAGE_NAME"
+        echo "  Registry: $REGISTRY"
+      - 'echo "  Config File: {{.ENV_CONFIG_FILE}}"'
+      - 'echo "  Deploy User: $(grep "^DEPLOY_USER=" {{.ENV_CONFIG_FILE}} | cut -d"=" -f2)"'
+      - 'echo ""'
+      - 'echo "  Available environments:"'
+      - |
+        sed -n '/^\[environments\]/,/^\[/p' {{.ENV_CONFIG_FILE}} | grep "^[a-zA-Z]*=" | while read line; do
+          env_name=$(echo "$line" | cut -d'=' -f1)
+          env_ip=$(echo "$line" | cut -d'=' -f2)
+          if [ -n "$env_ip" ]; then
+            echo "    $env_name: $env_ip"
+          else
+            echo "    $env_name: (IP not set)"
+          fi
+        done
