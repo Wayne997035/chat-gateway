@@ -53,12 +53,13 @@ func Router() *gin.Engine {
 
 		// 只允許特定的來源（生產環境應該從配置文件讀取）
 		allowedOrigins := map[string]bool{
-			"http://localhost:3000":  true, // 開發環境前端
-			"http://localhost:8080":  true, // 本地測試
-			"http://127.0.0.1:5500":  true, // Live Server
-			"http://127.0.0.1:8080":  true, // 本地測試 (127.0.0.1)
-			"http://localhost:5500":  true, // Live Server (localhost)
-			"https://yourdomain.com": true, // 生產環境（請修改為實際域名）
+			"http://localhost:3000":                           true, // 開發環境前端
+			"http://localhost:8080":                           true, // 本地測試
+			"http://127.0.0.1:5500":                           true, // Live Server
+			"http://127.0.0.1:8080":                           true, // 本地測試 (127.0.0.1)
+			"http://localhost:5500":                           true, // Live Server (localhost)
+			"https://thunderous-eclair-edba87.netlify.app":   true, // Netlify 部署
+			"https://yourdomain.com":                          true, // 生產環境（請修改為實際域名）
 		}
 
 		if allowedOrigins[origin] {
