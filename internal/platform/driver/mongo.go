@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"chat-gateway/internal/platform/config"
@@ -30,29 +31,23 @@ func ConnectMongo() error {
 
 // InitMongo 初始化 MongoDB 連接.
 func InitMongo(cfg config.MongoConfig) error {
+	logger.LogInfof("=== 開始連接 MongoDB ===")
+	logger.LogInfof("MongoDB URL: %s", maskPassword(cfg.URL))
+	logger.LogInfof("MongoDB Database: %s", cfg.Database)
+	logger.LogInfof("MongoDB Username: %s", cfg.Username)
+	logger.LogInfof("MongoDB TLS Enabled: %v", cfg.TLSEnabled)
+	
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ConnectTimeout)*time.Second)
 	defer cancel()
-
-	// 從環境變量讀取認證信息
-	mongoUsername := os.Getenv("MONGO_USERNAME")
-	mongoPassword := os.Getenv("MONGO_PASSWORD")
-
-	// 如果配置文件中有值，使用配置文件（向後兼容）
-	if cfg.Username != "" {
-		mongoUsername = cfg.Username
-	}
-	if cfg.Password != "" {
-		mongoPassword = cfg.Password
-	}
 
 	// 設置連接選項
 	clientOptions := options.Client().ApplyURI(cfg.URL)
 
 	// 如果有認證信息，設置認證
-	if mongoUsername != "" && mongoPassword != "" {
+	if cfg.Username != "" && cfg.Password != "" {
 		credential := options.Credential{
-			Username: mongoUsername,
-			Password: mongoPassword,
+			Username: cfg.Username,
+			Password: cfg.Password,
 		}
 		clientOptions.SetAuth(credential)
 		logger.LogInfof("MongoDB 使用認證連接")
@@ -155,4 +150,21 @@ func loadMongoTLSConfig(cfg config.MongoConfig) (*tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+// maskPassword 遮蔽 URL 中的密碼
+func maskPassword(url string) string {
+	if url == "" {
+		return "(空)"
+	}
+	
+	// 遮蔽密碼部分: mongodb://user:password@host -> mongodb://user:***@host
+	re := regexp.MustCompile(`(mongodb(?:\+srv)?://[^:]+:)([^@]+)(@.+)`)
+	masked := re.ReplaceAllString(url, `$1***$3`)
+	
+	if masked == url {
+		return url
+	}
+	
+	return masked
 }
