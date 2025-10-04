@@ -374,16 +374,16 @@ func maskMongoURL(url string) string {
 	if url == "" {
 		return "(空)"
 	}
-	
+
 	// 遮蔽密碼部分，保留結構以便除錯
 	// 例如: mongodb://user:password@host:port/db -> mongodb://user:***@host:port/db
 	re := regexp.MustCompile(`(mongodb(?:\+srv)?://[^:]+:)([^@]+)(@.+)`)
 	masked := re.ReplaceAllString(url, `$1***$3`)
-	
+
 	if masked == url {
 		// 如果沒有密碼，顯示完整 URL
 		return url
 	}
-	
+
 	return masked
 }

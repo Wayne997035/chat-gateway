@@ -80,4 +80,3 @@ func GetRequestMetadataFromGin(c *gin.Context) *RequestMetadata {
 		UserAgent: c.Request.UserAgent(),
 	}
 }
-

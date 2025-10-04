@@ -1,10 +1,5 @@
 package message
 
-import (
-	"errors"
-	"strings"
-)
-
 // CreateMessageRequest 創建消息請求.
 type CreateMessageRequest struct {
 	Content   string `json:"content" binding:"required"`
@@ -37,8 +32,8 @@ const (
 
 // 消息狀態常數.
 const (
-	MessageStatusSent     = "sent"
+	MessageStatusSent      = "sent"
 	MessageStatusDelivered = "delivered"
-	MessageStatusRead     = "read"
-	MessageStatusFailed   = "failed"
+	MessageStatusRead      = "read"
+	MessageStatusFailed    = "failed"
 )

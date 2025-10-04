@@ -13,7 +13,7 @@ import (
 // SafeError 安全的錯誤響應（不洩露內部信息）
 func SafeError(c *gin.Context, statusCode int, err error, userMessage string) {
 	requestID := middleware.GetRequestID(c)
-	
+
 	// 記錄真實錯誤到日誌（用於調試）
 	logger.Error(c.Request.Context(), fmt.Sprintf("API Error: %v", err),
 		logger.WithDetails(map[string]interface{}{
@@ -22,13 +22,13 @@ func SafeError(c *gin.Context, statusCode int, err error, userMessage string) {
 			"method":     c.Request.Method,
 			"status":     statusCode,
 		}))
-	
+
 	// 根據錯誤類型決定是否顯示詳情
 	message := userMessage
 	if shouldShowError(err) {
 		message = err.Error()
 	}
-	
+
 	c.JSON(statusCode, gin.H{
 		"error":      message,
 		"success":    false,
@@ -41,9 +41,9 @@ func shouldShowError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errMsg := err.Error()
-	
+
 	// 不應顯示的錯誤關鍵字（可能洩露敏感信息）
 	dangerousKeywords := []string{
 		"mongo",
@@ -58,14 +58,14 @@ func shouldShowError(err error) bool {
 		"stack",
 		"panic",
 	}
-	
+
 	lowerMsg := strings.ToLower(errMsg)
 	for _, keyword := range dangerousKeywords {
 		if strings.Contains(lowerMsg, keyword) {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -129,11 +129,10 @@ func RateLimitExceeded(c *gin.Context) {
 }
 
 // ValidationError 驗證錯誤
-func ValidationError(c *gin.Context, field string, message string) {
+func ValidationError(c *gin.Context, field, message string) {
 	c.JSON(400, gin.H{
 		"error":      fmt.Sprintf("%s: %s", field, message),
 		"success":    false,
 		"request_id": middleware.GetRequestID(c),
 	})
 }
-

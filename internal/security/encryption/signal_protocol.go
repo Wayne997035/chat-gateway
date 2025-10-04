@@ -214,6 +214,7 @@ func (sp *SignalProtocol) EncryptMessage(sessionID string, plaintext []byte) ([]
 	}
 
 	// 加密消息
+	// #nosec G407 -- IV is derived from ChainKey using HKDF, unique per message
 	ciphertext := aesGCM.Seal(nil, messageKey.IV, plaintext, nil)
 
 	// 更新發送鏈密鑰
@@ -224,9 +225,11 @@ func (sp *SignalProtocol) EncryptMessage(sessionID string, plaintext []byte) ([]
 	header := sp.createMessageHeader(sessionID, session.SendMessageNumber, messageKey)
 
 	// 組合消息頭和密文
-	encryptedMessage := append(header, ciphertext...)
+	result := make([]byte, len(header)+len(ciphertext))
+	copy(result, header)
+	copy(result[len(header):], ciphertext)
 
-	return encryptedMessage, nil
+	return result, nil
 }
 
 // DecryptMessage 解密消息
@@ -341,7 +344,7 @@ type MessageHeader struct {
 }
 
 // computeMAC 計算消息認證碼
-func (sp *SignalProtocol) computeMAC(key []byte, sessionID []byte, messageNumber uint32) []byte {
+func (sp *SignalProtocol) computeMAC(key, sessionID []byte, messageNumber uint32) []byte {
 	h := sha512.New()
 	h.Write(key)
 	h.Write(sessionID)

@@ -12,12 +12,12 @@ import (
 func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 消息集合索引
 	messagesCollection := db.Collection("messages")
-	
+
 	// 1. 聊天室 ID + 創建時間複合索引（最重要的索引）
 	roomTimeIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"room_id", 1},
-			{"created_at", -1},
+			{Key: "room_id", Value: 1},
+			{Key: "created_at", Value: -1},
 		},
 		Options: options.Index().SetName("room_time_idx"),
 	}
@@ -25,8 +25,8 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 2. 發送者 ID + 創建時間索引
 	senderTimeIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"sender_id", 1},
-			{"created_at", -1},
+			{Key: "sender_id", Value: 1},
+			{Key: "created_at", Value: -1},
 		},
 		Options: options.Index().SetName("sender_time_idx"),
 	}
@@ -34,7 +34,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 3. 消息類型索引
 	messageTypeIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"type", 1},
+			{Key: "type", Value: 1},
 		},
 		Options: options.Index().SetName("type_idx"),
 	}
@@ -42,7 +42,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 4. 全文搜索索引
 	textSearchIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"content", "text"},
+			{Key: "content", Value: "text"},
 		},
 		Options: options.Index().SetName("content_text_idx"),
 	}
@@ -50,8 +50,8 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 5. 已讀狀態索引
 	readStatusIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"read_by.user_id", 1},
-			{"created_at", -1},
+			{Key: "read_by.user_id", Value: 1},
+			{Key: "created_at", Value: -1},
 		},
 		Options: options.Index().SetName("read_status_idx"),
 	}
@@ -76,7 +76,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 1. 聊天室類型索引
 	roomTypeIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"type", 1},
+			{Key: "type", Value: 1},
 		},
 		Options: options.Index().SetName("room_type_idx"),
 	}
@@ -84,7 +84,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 2. 擁有者 ID 索引
 	ownerIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"owner_id", 1},
+			{Key: "owner_id", Value: 1},
 		},
 		Options: options.Index().SetName("owner_idx"),
 	}
@@ -92,7 +92,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 3. 成員用戶 ID 索引
 	memberIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"members.user_id", 1},
+			{Key: "members.user_id", Value: 1},
 		},
 		Options: options.Index().SetName("member_idx"),
 	}
@@ -100,7 +100,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 4. 最後消息時間索引
 	lastMessageIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"last_message_at", -1},
+			{Key: "last_message_at", Value: -1},
 		},
 		Options: options.Index().SetName("last_message_idx"),
 	}
@@ -108,7 +108,7 @@ func CreateIndexes(ctx context.Context, db *mongo.Database) error {
 	// 5. 創建時間索引
 	createdAtIndex := mongo.IndexModel{
 		Keys: bson.D{
-			{"created_at", -1},
+			{Key: "created_at", Value: -1},
 		},
 		Options: options.Index().SetName("created_at_idx"),
 	}
@@ -142,8 +142,8 @@ func GetIndexStats(ctx context.Context, db *mongo.Database) (map[string]interfac
 	}
 
 	var messageIndexes []bson.M
-	if err = messagesStats.All(ctx, &messageIndexes); err != nil {
-		return nil, err
+	if allErr := messagesStats.All(ctx, &messageIndexes); allErr != nil {
+		return nil, allErr
 	}
 	stats["messages_indexes"] = messageIndexes
 
@@ -155,8 +155,8 @@ func GetIndexStats(ctx context.Context, db *mongo.Database) (map[string]interfac
 	}
 
 	var roomIndexes []bson.M
-	if err = roomsStats.All(ctx, &roomIndexes); err != nil {
-		return nil, err
+	if allErr := roomsStats.All(ctx, &roomIndexes); allErr != nil {
+		return nil, allErr
 	}
 	stats["chat_rooms_indexes"] = roomIndexes
 

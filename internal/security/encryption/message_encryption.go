@@ -3,7 +3,7 @@ package encryption
 import (
 	"fmt"
 	"log"
-	
+
 	"chat-gateway/internal/security/keymanager"
 )
 
@@ -20,7 +20,7 @@ func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence
 		log.Println("[WARNING] KeyManager is nil. Encryption will be disabled.")
 		enabled = false
 	}
-	
+
 	return &MessageEncryption{
 		enabled:    enabled,
 		keyManager: km,
@@ -29,82 +29,82 @@ func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence
 
 // EncryptMessage 加密消息
 // 使用 AES-256-CTR 加密模式
-func (m *MessageEncryption) EncryptMessage(content string, roomID string) (string, error) {
+func (m *MessageEncryption) EncryptMessage(content, roomID string) (string, error) {
 	if !m.enabled {
 		log.Println("[WARNING] Message encryption is DISABLED. Messages are stored in PLAIN TEXT!")
-		return "plaintext:" + content, nil
+		return plaintextPrefix + content, nil
 	}
-	
+
 	if m.keyManager == nil {
 		return "", fmt.Errorf("key manager not initialized")
 	}
-	
+
 	// 獲取或創建聊天室密鑰
 	key, err := m.keyManager.GetOrCreateRoomKey(roomID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get room key: %w", err)
 	}
-	
+
 	// 創建 AES-256-CTR 加密器
 	aesCTR, err := NewAESCTREncryption(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create encryptor: %w", err)
 	}
-	
+
 	// 加密訊息
 	encrypted, err := aesCTR.Encrypt(content)
 	if err != nil {
 		return "", fmt.Errorf("encryption failed: %w", err)
 	}
-	
+
 	return encrypted, nil
 }
 
 // DecryptMessage 解密消息
-func (m *MessageEncryption) DecryptMessage(encryptedContent string, roomID string) (string, error) {
+func (m *MessageEncryption) DecryptMessage(encryptedContent, roomID string) (string, error) {
 	if !m.enabled {
 		// 檢查是否有 plaintext 前綴
-		if len(encryptedContent) > 10 && encryptedContent[:10] == "plaintext:" {
-			return encryptedContent[10:], nil
+		if len(encryptedContent) > len(plaintextPrefix) && encryptedContent[:len(plaintextPrefix)] == plaintextPrefix {
+			return encryptedContent[len(plaintextPrefix):], nil
 		}
 		return encryptedContent, nil
 	}
-	
+
 	if m.keyManager == nil {
 		return "", fmt.Errorf("key manager not initialized")
 	}
-	
+
 	// 檢查是否是舊格式（plaintext 或 encrypted）
 	if len(encryptedContent) > 10 {
 		prefix := encryptedContent[:10]
-		if prefix == "plaintext:" {
+		if prefix == plaintextPrefix {
 			return encryptedContent[10:], nil
 		}
-		if prefix == "encrypted:" {
+		if prefix == encryptedPrefix {
 			// 舊的假加密格式，嘗試解碼
 			log.Printf("[WARNING] Found old fake encryption format for room %s", roomID)
 			return "", fmt.Errorf("old encryption format not supported, message cannot be decrypted")
 		}
 	}
-	
+
 	// 獲取聊天室密鑰
 	key, err := m.keyManager.GetOrCreateRoomKey(roomID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get room key: %w", err)
 	}
-	
+
 	// 創建 AES-256-CTR 解密器
 	aesCTR, err := NewAESCTREncryption(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create decryptor: %w", err)
 	}
-	
+
 	// 解密訊息
 	decrypted, err := aesCTR.Decrypt(encryptedContent)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed: %w", err)
 	}
-	
+
 	return decrypted, nil
 }
 
@@ -113,18 +113,18 @@ func (m *MessageEncryption) IsEncrypted(content string) bool {
 	if len(content) < 10 {
 		return false
 	}
-	
+
 	prefix := content[:10]
 	// 支持 AES-256-CTR 格式
 	if prefix == "aes256ctr:" {
 		return true
 	}
-	
+
 	// 舊格式
-	if prefix == "encrypted:" || prefix == "plaintext:" {
+	if prefix == encryptedPrefix || prefix == plaintextPrefix {
 		return false
 	}
-	
+
 	return false
 }
 
@@ -133,6 +133,6 @@ func (m *MessageEncryption) GetKeyInfo(roomID string) (*keymanager.KeyInfo, erro
 	if m.keyManager == nil {
 		return nil, fmt.Errorf("key manager not initialized")
 	}
-	
+
 	return m.keyManager.GetKeyInfo(roomID)
 }

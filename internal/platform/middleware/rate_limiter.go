@@ -169,4 +169,3 @@ func (p *PerEndpointRateLimiter) Middleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-

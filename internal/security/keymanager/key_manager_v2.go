@@ -117,15 +117,6 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 	return km.createRoomKeyUnsafe(roomID)
 }
 
-// createRoomKey 創建新的聊天室密鑰（保存到 DB）
-// 會獲取寫鎖，外部調用使用
-func (km *KeyManagerWithPersistence) createRoomKey(roomID string) ([]byte, error) {
-	km.mu.Lock()
-	defer km.mu.Unlock()
-
-	return km.createRoomKeyUnsafe(roomID)
-}
-
 // createRoomKeyUnsafe 創建新的聊天室密鑰（不加鎖版本）
 // 調用者必須已經持有 km.mu 寫鎖
 func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte, error) {
@@ -291,6 +282,7 @@ func (km *KeyManagerWithPersistence) encryptRoomKey(roomKey []byte) (string, err
 	}
 
 	// 使用 CTR 模式加密
+	// #nosec G407 -- IV is dynamically generated from crypto/rand above, not hardcoded
 	stream := cipher.NewCTR(block, iv)
 	stream.XORKeyStream(ciphertext[aes.BlockSize:], roomKey)
 
@@ -327,6 +319,7 @@ func (km *KeyManagerWithPersistence) decryptRoomKey(encryptedKey string) ([]byte
 	encryptedData := ciphertext[aes.BlockSize:]
 
 	// 使用 CTR 模式解密
+	// #nosec G407 -- IV is extracted from encrypted data, not hardcoded
 	stream := cipher.NewCTR(block, iv)
 	plaintext := make([]byte, len(encryptedData))
 	stream.XORKeyStream(plaintext, encryptedData)

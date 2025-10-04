@@ -165,9 +165,9 @@ func writeLog(entry *LogEntry) {
 
 	// 寫入檔案和控制台
 	if logWriter != nil {
-		logWriter.Write(append(jsonData, '\n'))
+		_, _ = logWriter.Write(append(jsonData, '\n')) // #nosec G104 -- log write errors are not critical
 	}
-	os.Stdout.Write(append(jsonData, '\n'))
+	_, _ = os.Stdout.Write(append(jsonData, '\n')) // #nosec G104 -- stdout write errors are not critical
 }
 
 // getSourceLocation 獲取源代碼位置
@@ -200,7 +200,7 @@ func GetTraceID(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	if traceID, ok := ctx.Value("trace_id").(string); ok {
+	if traceID, ok := ctx.Value(traceIDKey).(string); ok {
 		return formatTraceID(traceID)
 	}
 	return ""
@@ -219,9 +219,14 @@ func NewTraceID() string {
 	return uuid.New().String()
 }
 
+// contextKey 自定義類型用於 context keys，避免衝突
+type contextKey string
+
+const traceIDKey contextKey = "trace_id"
+
 // WithTraceID 將 trace ID 添加到 context
 func WithTraceID(ctx context.Context, traceID string) context.Context {
-	return context.WithValue(ctx, "trace_id", traceID)
+	return context.WithValue(ctx, traceIDKey, traceID)
 }
 
 // Log 通用日誌方法

@@ -53,13 +53,13 @@ func Router() *gin.Engine {
 
 		// 只允許特定的來源（生產環境應該從配置文件讀取）
 		allowedOrigins := map[string]bool{
-			"http://localhost:3000":                           true, // 開發環境前端
-			"http://localhost:8080":                           true, // 本地測試
-			"http://127.0.0.1:5500":                           true, // Live Server
-			"http://127.0.0.1:8080":                           true, // 本地測試 (127.0.0.1)
-			"http://localhost:5500":                           true, // Live Server (localhost)
-			"https://thunderous-eclair-edba87.netlify.app":   true, // Netlify 部署
-			"https://yourdomain.com":                          true, // 生產環境（請修改為實際域名）
+			"http://localhost:3000":                        true, // 開發環境前端
+			"http://localhost:8080":                        true, // 本地測試
+			"http://127.0.0.1:5500":                        true, // Live Server
+			"http://127.0.0.1:8080":                        true, // 本地測試 (127.0.0.1)
+			"http://localhost:5500":                        true, // Live Server (localhost)
+			"https://thunderous-eclair-edba87.netlify.app": true, // Netlify 部署
+			"https://yourdomain.com":                       true, // 生產環境（請修改為實際域名）
 		}
 
 		if allowedOrigins[origin] {
@@ -220,7 +220,7 @@ func createRoom(c *gin.Context) {
 			AllowInvite:         true,
 			AllowEditMessages:   true,
 			AllowDeleteMessages: true,
-			MaxMembers:          int32(maxMembers),
+			MaxMembers:          int32(maxMembers), // #nosec G115 -- maxMembers is validated above
 		},
 	}
 
@@ -267,14 +267,12 @@ func listUserRooms(c *gin.Context) {
 	}
 	cursor := c.Query("cursor")
 
-	// 可選：解析 limit 參數
-	if limitStr := c.Query("limit"); limitStr != "" {
-		// 可以在這裡解析 limitStr，暫時使用默認值
-	}
+	// 可選：解析 limit 參數（目前使用默認值）
+	_ = c.Query("limit") // TODO: 未來可以實現自定義 limit
 
 	grpcReq := &chat.ListUserRoomsRequest{
 		UserId: userID,
-		Limit:  int32(limit),
+		Limit:  int32(limit), // #nosec G115 -- limit is validated above
 		Cursor: cursor,
 	}
 
@@ -423,6 +421,7 @@ func getMessages(c *gin.Context) {
 	cfg := config.Get()
 	defaultLimit := int32(20)
 	if cfg != nil && cfg.Limits.Pagination.DefaultPageSize > 0 {
+		// #nosec G115 -- DefaultPageSize is validated in config
 		defaultLimit = int32(cfg.Limits.Pagination.DefaultPageSize)
 	}
 

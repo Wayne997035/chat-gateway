@@ -156,4 +156,3 @@ func (l *SSEConnectionLimiter) Stats() map[string]interface{} {
 		"max_per_ip":        l.maxPerIP,
 	}
 }
-

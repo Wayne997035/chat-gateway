@@ -20,7 +20,7 @@ type Message struct {
 	Content   string    `bson:"content" json:"content"`
 	SenderID  string    `bson:"sender_id" json:"sender_id"`
 	ChannelID string    `bson:"channel_id" json:"channel_id"`
-	Type      string    `bson:"type" json:"type"` // text, image, file, etc.
+	Type      string    `bson:"type" json:"type"`     // text, image, file, etc.
 	Status    string    `bson:"status" json:"status"` // sent, delivered, read
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`

@@ -132,19 +132,19 @@ func (s *ChatRoomStore) Delete(ctx context.Context, id string) error {
 }
 
 // ListUserRooms 列出用戶的聊天室
-func (s *ChatRoomStore) ListUserRooms(ctx context.Context, userID string, limit int, cursor string) ([]*ChatRoom, string, bool, error) {
+func (s *ChatRoomStore) ListUserRooms(ctx context.Context, userID string, limit int, cursor string) (rooms []*ChatRoom, nextCursor string, hasMore bool, err error) {
 	filter := bson.M{
 		"members.user_id": userID,
 	}
 
 	opts := options.Find()
 	opts.SetLimit(int64(limit + 1)) // 多取一個用於判斷是否有更多
-	opts.SetSort(bson.D{{"last_message_at", -1}})
+	opts.SetSort(bson.D{{Key: "last_message_at", Value: -1}})
 
 	// 如果有游標，添加游標條件
 	if cursor != "" {
-		cursorTime, err := time.Parse(time.RFC3339, cursor)
-		if err == nil {
+		cursorTime, parseErr := time.Parse(time.RFC3339, cursor)
+		if parseErr == nil {
 			filter["last_message_at"] = bson.M{"$lt": cursorTime}
 		}
 	}
@@ -155,7 +155,7 @@ func (s *ChatRoomStore) ListUserRooms(ctx context.Context, userID string, limit 
 	}
 	defer cursorResult.Close(ctx)
 
-	var rooms []*ChatRoom
+	rooms = []*ChatRoom{}
 	for cursorResult.Next(ctx) {
 		var room ChatRoom
 		if err := cursorResult.Decode(&room); err != nil {
@@ -165,13 +165,12 @@ func (s *ChatRoomStore) ListUserRooms(ctx context.Context, userID string, limit 
 	}
 
 	// 檢查是否有更多數據
-	hasMore := len(rooms) > limit
+	hasMore = len(rooms) > limit
 	if hasMore {
 		rooms = rooms[:limit] // 移除多取的那一個
 	}
 
 	// 生成下一個游標
-	var nextCursor string
 	if hasMore && len(rooms) > 0 {
 		nextCursor = rooms[len(rooms)-1].LastMessageAt.Format(time.RFC3339)
 	}

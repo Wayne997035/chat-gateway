@@ -26,13 +26,13 @@ func ConnectMongo() error {
 		return fmt.Errorf("配置未載入")
 	}
 
-	return InitMongo(cfg.Database.Mongo)
+	return InitMongo(&cfg.Database.Mongo)
 }
 
 // InitMongo 初始化 MongoDB 連接.
-func InitMongo(cfg config.MongoConfig) error {
+func InitMongo(cfg *config.MongoConfig) error {
 	logger.LogInfof("[MongoDB] 連接中... %s", maskPassword(cfg.URL))
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ConnectTimeout)*time.Second)
 	defer cancel()
 
@@ -57,8 +57,8 @@ func InitMongo(cfg config.MongoConfig) error {
 		clientOptions.SetTLSConfig(tlsConfig)
 	}
 
-	clientOptions.SetMaxPoolSize(uint64(cfg.MaxPoolSize))
-	clientOptions.SetMinPoolSize(uint64(cfg.MinPoolSize))
+	clientOptions.SetMaxPoolSize(cfg.MaxPoolSize)
+	clientOptions.SetMinPoolSize(cfg.MinPoolSize)
 	clientOptions.SetMaxConnIdleTime(time.Duration(cfg.MaxConnIdleTime) * time.Second)
 	clientOptions.SetServerSelectionTimeout(time.Duration(cfg.ServerSelectionTimeout) * time.Second)
 
@@ -106,16 +106,16 @@ func CloseMongo() error {
 }
 
 // loadMongoTLSConfig 載入 MongoDB TLS 配置
-func loadMongoTLSConfig(cfg config.MongoConfig) (*tls.Config, error) {
+func loadMongoTLSConfig(cfg *config.MongoConfig) (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 	}
 
 	// 如果設置了跳過驗證（僅開發環境）
 	if cfg.TLSInsecureSkipVerify {
-	tlsConfig.InsecureSkipVerify = true
-	logger.LogInfof("[WARNING] MongoDB TLS 證書驗證已跳過（僅開發環境）")
-	return tlsConfig, nil
+		tlsConfig.InsecureSkipVerify = true
+		logger.LogInfof("[WARNING] MongoDB TLS 證書驗證已跳過（僅開發環境）")
+		return tlsConfig, nil
 	}
 
 	// 載入 CA 證書
@@ -149,14 +149,14 @@ func maskPassword(url string) string {
 	if url == "" {
 		return "(空)"
 	}
-	
-	// 遮蔽密碼部分: mongodb://user:password@host -> mongodb://user:***@host
+
+	// 遮蔽密碼部分
 	re := regexp.MustCompile(`(mongodb(?:\+srv)?://[^:]+:)([^@]+)(@.+)`)
 	masked := re.ReplaceAllString(url, `$1***$3`)
-	
+
 	if masked == url {
 		return url
 	}
-	
+
 	return masked
 }

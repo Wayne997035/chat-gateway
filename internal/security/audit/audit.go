@@ -23,16 +23,16 @@ func NewAuditService(enabled bool) *AuditService {
 
 // AuditEvent 審計事件
 type AuditEvent struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	EventType   string                 `json:"event_type"`
-	UserID      string                 `json:"user_id"`
-	RoomID      string                 `json:"room_id,omitempty"`
-	MessageID   string                 `json:"message_id,omitempty"`
-	Action      string                 `json:"action"`
-	Result      string                 `json:"result"` // success, failure
-	Details     map[string]interface{} `json:"details,omitempty"`
-	IPAddress   string                 `json:"ip_address,omitempty"`
-	UserAgent   string                 `json:"user_agent,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	EventType string                 `json:"event_type"`
+	UserID    string                 `json:"user_id"`
+	RoomID    string                 `json:"room_id,omitempty"`
+	MessageID string                 `json:"message_id,omitempty"`
+	Action    string                 `json:"action"`
+	Result    string                 `json:"result"` // success, failure
+	Details   map[string]interface{} `json:"details,omitempty"`
+	IPAddress string                 `json:"ip_address,omitempty"`
+	UserAgent string                 `json:"user_agent,omitempty"`
 }
 
 // LogRoomCreation 記錄聊天室創建
@@ -54,7 +54,7 @@ func (a *AuditService) LogRoomCreation(ctx context.Context, userID, roomID, room
 	}
 
 	a.enrichWithMetadata(ctx, &event)
-	a.log(event)
+	a.log(&event)
 }
 
 // LogMessageSent 記錄消息發送
@@ -76,7 +76,7 @@ func (a *AuditService) LogMessageSent(ctx context.Context, userID, roomID, messa
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogMessageRead 記錄消息已讀
@@ -95,7 +95,7 @@ func (a *AuditService) LogMessageRead(ctx context.Context, userID, roomID, messa
 		Result:    "success",
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogRoomJoin 記錄加入聊天室
@@ -113,7 +113,7 @@ func (a *AuditService) LogRoomJoin(ctx context.Context, userID, roomID string) {
 		Result:    "success",
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogRoomLeave 記錄離開聊天室
@@ -131,7 +131,7 @@ func (a *AuditService) LogRoomLeave(ctx context.Context, userID, roomID string) 
 		Result:    "success",
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogMemberAdded 記錄添加成員
@@ -152,7 +152,7 @@ func (a *AuditService) LogMemberAdded(ctx context.Context, operatorID, roomID, m
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogMemberRemoved 記錄移除成員
@@ -173,7 +173,7 @@ func (a *AuditService) LogMemberRemoved(ctx context.Context, operatorID, roomID,
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogAuthenticationFailure 記錄認證失敗
@@ -193,7 +193,7 @@ func (a *AuditService) LogAuthenticationFailure(ctx context.Context, userID, rea
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogRateLimitExceeded 記錄速率限制超過
@@ -214,7 +214,7 @@ func (a *AuditService) LogRateLimitExceeded(ctx context.Context, ipAddress, endp
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogSuspiciousActivity 記錄可疑活動
@@ -235,7 +235,7 @@ func (a *AuditService) LogSuspiciousActivity(ctx context.Context, userID, ipAddr
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogAccessDenied 記錄訪問被拒絕
@@ -256,7 +256,7 @@ func (a *AuditService) LogAccessDenied(ctx context.Context, userID, roomID, reas
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogDataModification 記錄數據修改
@@ -278,11 +278,11 @@ func (a *AuditService) LogDataModification(ctx context.Context, userID, resource
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // LogSecurityEvent 記錄安全事件
-func (a *AuditService) LogSecurityEvent(ctx context.Context, eventType, description string, severity string, details map[string]interface{}) {
+func (a *AuditService) LogSecurityEvent(ctx context.Context, eventType, description, severity string, details map[string]interface{}) {
 	if !a.enabled {
 		return
 	}
@@ -299,11 +299,11 @@ func (a *AuditService) LogSecurityEvent(ctx context.Context, eventType, descript
 		},
 	}
 
-	a.log(event)
+	a.log(&event)
 }
 
 // log 記錄審計事件
-func (a *AuditService) log(event AuditEvent) {
+func (a *AuditService) log(event *AuditEvent) {
 	// 轉換為 JSON
 	jsonData, err := json.Marshal(event)
 	if err != nil {
@@ -330,7 +330,7 @@ func (a *AuditService) enrichWithMetadata(ctx context.Context, event *AuditEvent
 	// 定義 context key（需要與 middleware 一致）
 	type contextKey string
 	const requestMetadataKey contextKey = "request_metadata"
-	
+
 	// 嘗試從 context 提取元數據
 	if metadata := ctx.Value(requestMetadataKey); metadata != nil {
 		if meta, ok := metadata.(*struct {
@@ -343,4 +343,3 @@ func (a *AuditService) enrichWithMetadata(ctx context.Context, event *AuditEvent
 		}
 	}
 }
-

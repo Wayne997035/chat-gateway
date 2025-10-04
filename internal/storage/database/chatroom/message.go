@@ -184,9 +184,9 @@ func (s *MessageStore) GetByRoomID(ctx context.Context, roomID string, limit int
 	}
 
 	opts := options.Find()
-	opts.SetLimit(int64(limit + 1))          // 多取一個用於判斷是否有更多
-	opts.SetSort(bson.D{{"created_at", -1}}) // 按創建時間倒序排列（新消息在前）
-	opts.SetProjection(bson.M{               // 只選擇需要的字段，減少網絡傳輸
+	opts.SetLimit(int64(limit + 1))                      // 多取一個用於判斷是否有更多
+	opts.SetSort(bson.D{{Key: "created_at", Value: -1}}) // 按創建時間倒序排列（新消息在前）
+	opts.SetProjection(bson.M{                           // 只選擇需要的字段，減少網絡傳輸
 		"_id":                 1,
 		"id":                  1,
 		"room_id":             1,
@@ -263,7 +263,7 @@ func (s *MessageStore) GetHistoryMessages(ctx context.Context, roomID string, li
 
 	opts := options.Find()
 	opts.SetLimit(int64(limit + 1))
-	opts.SetSort(bson.D{{"created_at", 1}}) // 按創建時間正序排列（舊消息在上，新消息在下）
+	opts.SetSort(bson.D{{Key: "created_at", Value: 1}}) // 按創建時間正序排列（舊消息在上，新消息在下）
 
 	// 只選擇必要字段，提高查詢性能
 	opts.SetProjection(bson.M{
@@ -346,7 +346,7 @@ func (s *MessageStore) GetRecentMessages(ctx context.Context, roomID string, sin
 
 	opts := options.Find()
 	opts.SetLimit(int64(limit))
-	opts.SetSort(bson.D{{"created_at", 1}}) // 按時間正序排列
+	opts.SetSort(bson.D{{Key: "created_at", Value: 1}}) // 按時間正序排列
 
 	cursorResult, err := s.collection.Find(ctx, filter, opts)
 	if err != nil {
@@ -492,7 +492,7 @@ func (s *MessageStore) Search(ctx context.Context, roomID, query string, userID 
 
 	opts := options.Find()
 	opts.SetLimit(int64(limit + 1)) // 多取一個用於判斷是否有更多
-	opts.SetSort(bson.D{{"created_at", -1}})
+	opts.SetSort(bson.D{{Key: "created_at", Value: -1}})
 
 	// 如果有游標，添加游標條件
 	if cursor != "" {
@@ -511,8 +511,8 @@ func (s *MessageStore) Search(ctx context.Context, roomID, query string, userID 
 	var messages []*Message
 	for cursorResult.Next(ctx) {
 		var message Message
-		if err := cursorResult.Decode(&message); err != nil {
-			return nil, "", false, 0, err
+		if decodeErr := cursorResult.Decode(&message); decodeErr != nil {
+			return nil, "", false, 0, decodeErr
 		}
 		messages = append(messages, &message)
 	}

@@ -28,8 +28,8 @@ func NewRepositories(cfg *config.Config) *Repositories {
 	// 創建索引以優化查詢性能
 	ctx := context.Background()
 	if err := chatroom.CreateIndexes(ctx, db); err != nil {
-		// 記錄錯誤但不中斷服務啟動
-		// 可以在這裡添加日誌記錄
+		// 索引創建失敗不影響服務啟動，繼續運行
+		_ = err // 忽略索引創建錯誤
 	}
 
 	return &Repositories{

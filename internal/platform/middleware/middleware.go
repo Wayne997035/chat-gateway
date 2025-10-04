@@ -47,9 +47,9 @@ func RequireAuth() gin.HandlerFunc {
 		//     c.Abort()
 		//     return
 		// }
-		
+
 		// TODO: 調用 user 服務驗證
-		
+
 		c.Next()
 	}
 }
@@ -61,10 +61,9 @@ func CheckRoomMembership() gin.HandlerFunc {
 		// TODO: 檢查用戶是否是聊天室成員
 		// roomID := c.Param("room_id")
 		// userID := c.GetString("user_id") // 從認證中間件獲取
-		
+
 		// TODO: 調用 gRPC 檢查成員關係
-		
+
 		c.Next()
 	}
 }
-

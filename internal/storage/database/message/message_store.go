@@ -25,7 +25,7 @@ func NewMessageStore(db *mongo.Database) *MessageStore {
 func (s *MessageStore) Create(ctx context.Context, message *Message) error {
 	message.CreatedAt = time.Now()
 	message.UpdatedAt = time.Now()
-	
+
 	_, err := s.collection.InsertOne(ctx, message)
 	return err
 }
@@ -51,7 +51,7 @@ func (s *MessageStore) List(ctx context.Context, filter map[string]interface{}, 
 	opts := options.Find()
 	opts.SetLimit(limit)
 	opts.SetSkip(offset)
-	opts.SetSort(bson.D{{"created_at", -1}})
+	opts.SetSort(bson.D{{Key: "created_at", Value: -1}})
 
 	cursor, err := s.collection.Find(ctx, filter, opts)
 	if err != nil {

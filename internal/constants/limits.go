@@ -3,9 +3,9 @@ package constants
 // HTTP 請求相關常數
 const (
 	// 默認值（可被配置覆蓋）
-	DefaultMaxRequestBodySize   = 10 << 20 // 10MB
-	DefaultMaxMultipartMemory   = 10 << 20 // 10MB
-	DefaultRequestTimeout       = 30       // 秒
+	DefaultMaxRequestBodySize = 10 << 20 // 10MB
+	DefaultMaxMultipartMemory = 10 << 20 // 10MB
+	DefaultRequestTimeout     = 30       // 秒
 )
 
 // 分頁相關常數
@@ -31,20 +31,20 @@ const (
 
 // Rate Limiting 默認值
 const (
-	DefaultRateLimitPerMinute     = 100
-	DefaultMessageRateLimit       = 30
-	DefaultRoomCreateRateLimit    = 10
-	DefaultSSERateLimit           = 5
-	RateLimitCleanupIntervalMin   = 10 // 分鐘
+	DefaultRateLimitPerMinute   = 100
+	DefaultMessageRateLimit     = 30
+	DefaultRoomCreateRateLimit  = 10
+	DefaultSSERateLimit         = 5
+	RateLimitCleanupIntervalMin = 10 // 分鐘
 )
 
 // SSE 連接相關常數
 const (
-	DefaultSSEMaxConnectionsPerIP    = 3
-	DefaultSSEMaxTotalConnections    = 1000
-	DefaultSSEMinConnectionInterval  = 10  // 秒
-	DefaultSSEHeartbeatInterval      = 15  // 秒
-	SSEConnectionCleanupIntervalMin  = 10  // 分鐘
+	DefaultSSEMaxConnectionsPerIP   = 3
+	DefaultSSEMaxTotalConnections   = 1000
+	DefaultSSEMinConnectionInterval = 10 // 秒
+	DefaultSSEHeartbeatInterval     = 15 // 秒
+	SSEConnectionCleanupIntervalMin = 10 // 分鐘
 )
 
 // 密鑰管理相關常數
@@ -56,11 +56,11 @@ const (
 
 // MongoDB 查詢相關常數
 const (
-	DefaultMongoQueryLimit    = 20
-	MaxMongoQueryLimit        = 100
-	MaxMongoHistoryLimit      = 50
-	DefaultUserRoomsLimit     = 100
-	MaxStreamMessagesLimit    = 1000
+	DefaultMongoQueryLimit = 20
+	MaxMongoQueryLimit     = 100
+	MaxMongoHistoryLimit   = 50
+	DefaultUserRoomsLimit  = 100
+	MaxStreamMessagesLimit = 1000
 )
 
 // 用戶 ID 相關常數
@@ -73,4 +73,3 @@ const (
 	EncryptedPrefixLength = 10
 	MasterKeyLength       = 32 // 256 bits
 )
-

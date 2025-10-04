@@ -99,13 +99,13 @@ func dialWithTLS(address string, tlsConfig config.TLSConfig) (*grpc.ClientConn, 
 		})
 	}
 
-	return grpc.Dial(address, grpc.WithTransportCredentials(tlsCreds))
+	return grpc.NewClient(address, grpc.WithTransportCredentials(tlsCreds))
 }
 
 // dialInsecure 不使用 TLS 連接（僅開發環境）
 func dialInsecure(address string) (*grpc.ClientConn, error) {
 	fmt.Println("[WARNING] gRPC 使用不安全連接（開發環境）")
-	return grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	return grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 }
 
 // CloseConnection 關閉 gRPC 連接
@@ -127,4 +127,3 @@ func IsConnected() bool {
 	defer mu.RUnlock()
 	return conn != nil
 }
-

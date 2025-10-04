@@ -29,34 +29,34 @@ type KeyStore struct {
 // NewKeyStore 創建密鑰存儲
 func NewKeyStore(db *mongo.Database) *KeyStore {
 	collection := db.Collection("encryption_keys")
-	
+
 	// 創建索引
 	ctx := context.Background()
-	
+
 	// room_id + key_version 唯一索引
-	collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	_, _ = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "room_id", Value: 1},
 			{Key: "key_version", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
-	})
-	
+	}) // #nosec G104 -- index creation errors are not critical, DB will still work
+
 	// room_id + is_active 索引（快速查詢活躍密鑰）
-	collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	_, _ = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "room_id", Value: 1},
 			{Key: "is_active", Value: 1},
 		},
-	})
-	
+	}) // #nosec G104 -- index creation errors are not critical
+
 	// expires_at 索引（用於清理過期密鑰）
-	collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	_, _ = collection.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "expires_at", Value: 1},
 		},
-	})
-	
+	}) // #nosec G104 -- index creation errors are not critical
+
 	return &KeyStore{
 		collection: collection,
 	}
@@ -68,20 +68,20 @@ func (ks *KeyStore) SaveKey(ctx context.Context, doc *KeyDocument) error {
 	session, err := ks.collection.Database().Client().StartSession()
 	if err == nil {
 		defer session.EndSession(ctx)
-		
+
 		// 在事務中執行操作
 		_, err = session.WithTransaction(ctx, func(sc context.Context) (interface{}, error) {
 			return nil, ks.saveKeyWithContext(sc, doc)
 		})
-		
+
 		// 事務成功
 		if err == nil {
 			return nil
 		}
-		
+
 		// 事務失敗，降級為非事務版本（開發環境單節點 MongoDB）
 	}
-	
+
 	// 非事務版本（不保證原子性，但可用於開發環境）
 	return ks.saveKeyWithContext(ctx, doc)
 }
@@ -103,20 +103,20 @@ func (ks *KeyStore) saveKeyWithContext(ctx context.Context, doc *KeyDocument) er
 			return fmt.Errorf("failed to deactivate old keys: %w", err)
 		}
 	}
-	
+
 	// 保存新密鑰（使用 ReplaceOne with upsert）
 	filter := bson.M{
 		"room_id":     doc.RoomID,
 		"key_version": doc.KeyVersion,
 	}
-	
+
 	opts := options.Replace().SetUpsert(true)
-	
+
 	_, err := ks.collection.ReplaceOne(ctx, filter, doc, opts)
 	if err != nil {
 		return fmt.Errorf("failed to save key: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -126,7 +126,7 @@ func (ks *KeyStore) GetActiveKey(ctx context.Context, roomID string) (*KeyDocume
 		"room_id":   roomID,
 		"is_active": true,
 	}
-	
+
 	var doc KeyDocument
 	err := ks.collection.FindOne(ctx, filter).Decode(&doc)
 	if err == mongo.ErrNoDocuments {
@@ -135,7 +135,7 @@ func (ks *KeyStore) GetActiveKey(ctx context.Context, roomID string) (*KeyDocume
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active key: %w", err)
 	}
-	
+
 	return &doc, nil
 }
 
@@ -145,7 +145,7 @@ func (ks *KeyStore) GetKeyByVersion(ctx context.Context, roomID string, version 
 		"room_id":     roomID,
 		"key_version": version,
 	}
-	
+
 	var doc KeyDocument
 	err := ks.collection.FindOne(ctx, filter).Decode(&doc)
 	if err == mongo.ErrNoDocuments {
@@ -154,7 +154,7 @@ func (ks *KeyStore) GetKeyByVersion(ctx context.Context, roomID string, version 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get key by version: %w", err)
 	}
-	
+
 	return &doc, nil
 }
 
@@ -162,18 +162,18 @@ func (ks *KeyStore) GetKeyByVersion(ctx context.Context, roomID string, version 
 func (ks *KeyStore) GetAllKeys(ctx context.Context, roomID string) ([]*KeyDocument, error) {
 	filter := bson.M{"room_id": roomID}
 	opts := options.Find().SetSort(bson.D{{Key: "key_version", Value: -1}}) // 最新的在前
-	
+
 	cursor, err := ks.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all keys: %w", err)
 	}
 	defer cursor.Close(ctx)
-	
+
 	var keys []*KeyDocument
 	if err := cursor.All(ctx, &keys); err != nil {
 		return nil, fmt.Errorf("failed to decode keys: %w", err)
 	}
-	
+
 	return keys, nil
 }
 
@@ -183,12 +183,12 @@ func (ks *KeyStore) DeleteExpiredKeys(ctx context.Context) (int64, error) {
 		"expires_at": bson.M{"$lt": time.Now()},
 		"is_active":  false, // 只刪除非活躍的過期密鑰
 	}
-	
+
 	result, err := ks.collection.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete expired keys: %w", err)
 	}
-	
+
 	return result.DeletedCount, nil
 }
 
@@ -198,18 +198,17 @@ func (ks *KeyStore) GetKeysToRotate(ctx context.Context, rotationInterval time.D
 		"is_active":  true,
 		"rotated_at": bson.M{"$lt": time.Now().Add(-rotationInterval)},
 	}
-	
+
 	cursor, err := ks.collection.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get keys to rotate: %w", err)
 	}
 	defer cursor.Close(ctx)
-	
+
 	var keys []*KeyDocument
 	if err := cursor.All(ctx, &keys); err != nil {
 		return nil, fmt.Errorf("failed to decode keys: %w", err)
 	}
-	
+
 	return keys, nil
 }
-

@@ -1,7 +1,6 @@
 package message
 
 import (
-	"context"
 	"net/http"
 
 	"chat-gateway/internal/httputil"

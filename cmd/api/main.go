@@ -127,13 +127,13 @@ func mainNoExit() error {
 		}
 
 		// 創建帶持久化的密鑰管理器
-		mongoDb := driver.GetMongoDatabase()
-		if mongoDb == nil {
+		mongoDB := driver.GetMongoDatabase()
+		if mongoDB == nil {
 			logger.Error(ctx, "MongoDB 未初始化", nil)
 			return fmt.Errorf("database initialization failed")
 		}
 
-		keyManager, err = keymanager.NewKeyManagerWithPersistence(masterKey, mongoDb)
+		keyManager, err = keymanager.NewKeyManagerWithPersistence(masterKey, mongoDB)
 		if err != nil {
 			logger.Error(ctx, "密鑰管理器創建失敗", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 			return fmt.Errorf("encryption initialization failed")

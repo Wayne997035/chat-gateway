@@ -23,6 +23,14 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+const (
+	systemSenderID         = "system"
+	messageFormatErrorText = "[訊息格式錯誤]"
+	messageText            = "[訊息]"
+	decryptFailedText      = "[解密失敗]"
+	roomTypeDirect         = "direct"
+)
+
 // Server gRPC 服務器
 type Server struct {
 	chat.UnimplementedChatRoomServiceServer
@@ -59,7 +67,7 @@ func isValidUTF8(s string) bool {
 }
 
 // NewServer 創建新的 gRPC 服務器
-func NewServer(repos *database.Repositories, encryptionEnabled bool, auditEnabled bool, keyManager *keymanager.KeyManagerWithPersistence, tlsConfig config.TLSConfig) (*Server, error) {
+func NewServer(repos *database.Repositories, encryptionEnabled, auditEnabled bool, keyManager *keymanager.KeyManagerWithPersistence, tlsConfig config.TLSConfig) (*Server, error) {
 	var grpcServer *grpc.Server
 	ctx := context.Background()
 
@@ -156,7 +164,7 @@ func (s *Server) Stop() {
 // CreateRoom 創建聊天室
 func (s *Server) CreateRoom(ctx context.Context, req *chat.CreateRoomRequest) (*chat.CreateRoomResponse, error) {
 	// 如果是私聊，檢查是否已經存在相同的私聊聊天室
-	if req.Type == "direct" && len(req.MemberIds) == 2 {
+	if req.Type == roomTypeDirect && len(req.MemberIds) == 2 {
 		cfg := config.Get()
 		checkLimit := 100 // 默認
 		if cfg != nil && cfg.Limits.MongoDB.MaxQueryLimit > 0 {
@@ -165,54 +173,56 @@ func (s *Server) CreateRoom(ctx context.Context, req *chat.CreateRoomRequest) (*
 		existingRooms, _, _, err := s.repos.ChatRoom.ListUserRooms(ctx, req.OwnerId, checkLimit, "")
 		if err == nil {
 			for _, existingRoom := range existingRooms {
-				if existingRoom.Type == "direct" && len(existingRoom.Members) == 2 {
-					// 檢查是否包含相同的兩個成員
-					existingMemberIds := make(map[string]bool)
-					for _, member := range existingRoom.Members {
-						existingMemberIds[member.UserID] = true
-					}
+				if existingRoom.Type != roomTypeDirect || len(existingRoom.Members) != 2 {
+					continue
+				}
+				// 檢查是否包含相同的兩個成員
+				existingMemberIds := make(map[string]bool)
+				for i := range existingRoom.Members {
+					existingMemberIds[existingRoom.Members[i].UserID] = true
+				}
 
-					// 檢查請求中的成員是否都在現有聊天室中
-					allMembersExist := true
-					for _, memberID := range req.MemberIds {
-						if !existingMemberIds[memberID] {
-							allMembersExist = false
-							break
+				// 檢查請求中的成員是否都在現有聊天室中
+				allMembersExist := true
+				for _, memberID := range req.MemberIds {
+					if !existingMemberIds[memberID] {
+						allMembersExist = false
+						break
+					}
+				}
+
+				if allMembersExist {
+					// 找到重複的私聊，返回現有的聊天室
+					logger.Infof(ctx, "找到重複的私聊聊天室: %s", existingRoom.ID)
+
+					// 轉換為 gRPC 格式
+					grpcMembers := make([]*chat.RoomMember, len(existingRoom.Members))
+					for i := range existingRoom.Members {
+						member := &existingRoom.Members[i]
+						grpcMembers[i] = &chat.RoomMember{
+							UserId:   member.UserID,
+							Username: member.Username,
+							Role:     member.Role,
+							JoinedAt: member.JoinedAt.Unix(),
+							LastSeen: member.LastSeen.Unix(),
 						}
 					}
 
-					if allMembersExist {
-						// 找到重複的私聊，返回現有的聊天室
-						logger.Infof(ctx, "找到重複的私聊聊天室: %s", existingRoom.ID)
-
-						// 轉換為 gRPC 格式
-						grpcMembers := make([]*chat.RoomMember, len(existingRoom.Members))
-						for i, member := range existingRoom.Members {
-							grpcMembers[i] = &chat.RoomMember{
-								UserId:   member.UserID,
-								Username: member.Username,
-								Role:     member.Role,
-								JoinedAt: member.JoinedAt.Unix(),
-								LastSeen: member.LastSeen.Unix(),
-							}
-						}
-
-						grpcRoom := &chat.ChatRoom{
-							Id:        existingRoom.ID,
-							Name:      existingRoom.Name,
-							Type:      existingRoom.Type,
-							OwnerId:   existingRoom.OwnerID,
-							Members:   grpcMembers,
-							CreatedAt: existingRoom.CreatedAt.Unix(),
-							UpdatedAt: existingRoom.UpdatedAt.Unix(),
-						}
-
-						return &chat.CreateRoomResponse{
-							Success: true,
-							Message: "聊天室已存在",
-							Room:    grpcRoom,
-						}, nil
+					grpcRoom := &chat.ChatRoom{
+						Id:        existingRoom.ID,
+						Name:      existingRoom.Name,
+						Type:      existingRoom.Type,
+						OwnerId:   existingRoom.OwnerID,
+						Members:   grpcMembers,
+						CreatedAt: existingRoom.CreatedAt.Unix(),
+						UpdatedAt: existingRoom.UpdatedAt.Unix(),
 					}
+
+					return &chat.CreateRoomResponse{
+						Success: true,
+						Message: "聊天室已存在",
+						Room:    grpcRoom,
+					}, nil
 				}
 			}
 		}
@@ -298,7 +308,7 @@ func (s *Server) CreateRoom(ctx context.Context, req *chat.CreateRoomRequest) (*
 			AllowEditMessages:   room.Settings.AllowEditMessages,
 			AllowDeleteMessages: room.Settings.AllowDeleteMessages,
 			AllowPinMessages:    room.Settings.AllowPinMessages,
-			MaxMembers:          int32(room.Settings.MaxMembers),
+			MaxMembers:          int32(room.Settings.MaxMembers), // #nosec G115 -- MaxMembers is from DB
 			WelcomeMessage:      room.Settings.WelcomeMessage,
 		},
 		CreatedAt: room.CreatedAt.Unix(),
@@ -307,7 +317,8 @@ func (s *Server) CreateRoom(ctx context.Context, req *chat.CreateRoomRequest) (*
 
 	// 添加成員信息
 	grpcMembers := make([]*chat.RoomMember, len(room.Members))
-	for i, member := range room.Members {
+	for i := range room.Members {
+		member := &room.Members[i]
 		grpcMembers[i] = &chat.RoomMember{
 			UserId:   member.UserID,
 			Username: member.Username,
@@ -372,9 +383,9 @@ func (s *Server) JoinRoom(ctx context.Context, req *chat.JoinRoomRequest) (*chat
 	// 發送系統消息：XXX 已加入群組
 	systemMessage := chatroom.NewMessage()
 	systemMessage.RoomID = req.RoomId
-	systemMessage.SenderID = "system"
+	systemMessage.SenderID = systemSenderID
 	systemMessage.Content = req.UserId + " 已加入群組"
-	systemMessage.Type = "system"
+	systemMessage.Type = systemSenderID
 
 	if err := s.repos.Message.Create(ctx, &systemMessage); err != nil {
 		logger.Warning(ctx, "創建加入群組系統消息失敗",
@@ -383,12 +394,16 @@ func (s *Server) JoinRoom(ctx context.Context, req *chat.JoinRoomRequest) (*chat
 			logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 	} else {
 		// 更新聊天室的最後訊息
-		s.repos.ChatRoom.Update(ctx, req.RoomId, map[string]interface{}{
+		if updateErr := s.repos.ChatRoom.Update(ctx, req.RoomId, map[string]interface{}{
 			"last_message":      systemMessage.Content,
 			"last_message_time": systemMessage.CreatedAt,
 			"last_message_at":   systemMessage.CreatedAt,
 			"updated_at":        systemMessage.CreatedAt,
-		})
+		}); updateErr != nil {
+			logger.Warning(ctx, "更新聊天室最後訊息失敗（加入群組系統訊息）",
+				logger.WithRoomID(req.RoomId),
+				logger.WithDetails(map[string]interface{}{"error": updateErr.Error()}))
+		}
 	}
 
 	// 審計日誌
@@ -422,9 +437,9 @@ func (s *Server) LeaveRoom(ctx context.Context, req *chat.LeaveRoomRequest) (*ch
 	// 發送系統消息：XXX 已離開群組
 	systemMessage := chatroom.NewMessage()
 	systemMessage.RoomID = req.RoomId
-	systemMessage.SenderID = "system"
+	systemMessage.SenderID = systemSenderID
 	systemMessage.Content = req.UserId + " 已離開群組"
-	systemMessage.Type = "system"
+	systemMessage.Type = systemSenderID
 
 	if err := s.repos.Message.Create(ctx, &systemMessage); err != nil {
 		logger.Warning(ctx, "創建離開群組系統消息失敗",
@@ -433,12 +448,16 @@ func (s *Server) LeaveRoom(ctx context.Context, req *chat.LeaveRoomRequest) (*ch
 			logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 	} else {
 		// 更新聊天室的最後訊息
-		s.repos.ChatRoom.Update(ctx, req.RoomId, map[string]interface{}{
+		if updateErr := s.repos.ChatRoom.Update(ctx, req.RoomId, map[string]interface{}{
 			"last_message":      systemMessage.Content,
 			"last_message_time": systemMessage.CreatedAt,
 			"last_message_at":   systemMessage.CreatedAt,
 			"updated_at":        systemMessage.CreatedAt,
-		})
+		}); updateErr != nil {
+			logger.Warning(ctx, "更新聊天室最後訊息失敗（離開群組系統訊息）",
+				logger.WithRoomID(req.RoomId),
+				logger.WithDetails(map[string]interface{}{"error": updateErr.Error()}))
+		}
 	}
 
 	// 審計日誌
@@ -500,7 +519,8 @@ func (s *Server) ListUserRooms(ctx context.Context, req *chat.ListUserRoomsReque
 	for i, room := range rooms {
 		// 轉換成員信息
 		grpcMembers := make([]*chat.RoomMember, len(room.Members))
-		for j, member := range room.Members {
+		for j := range room.Members {
+			member := &room.Members[j]
 			grpcMembers[j] = &chat.RoomMember{
 				UserId:   member.UserID,
 				Username: member.Username,
@@ -525,13 +545,13 @@ func (s *Server) ListUserRooms(ctx context.Context, req *chat.ListUserRoomsReque
 					logger.WithRoomID(room.ID),
 					logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 				// 解密失敗，顯示通用訊息
-				lastMessage = "[訊息]"
+				lastMessage = messageText
 			} else {
 				// 確保是有效的 UTF-8（防止 gRPC 序列化錯誤）
 				if !isValidUTF8(decryptedLastMessage) {
 					logger.Warning(ctx, "last_message 包含無效的 UTF-8 字符",
 						logger.WithRoomID(room.ID))
-					lastMessage = "[訊息]"
+					lastMessage = messageText
 				} else {
 					lastMessage = decryptedLastMessage
 				}
@@ -632,13 +652,13 @@ func (s *Server) SendMessage(ctx context.Context, req *chat.SendMessageRequest) 
 	case "location":
 		lastMessagePreview = "[位置]"
 	default:
-		lastMessagePreview = "[訊息]"
+		lastMessagePreview = messageText
 	}
 
 	// 加密 last_message（使用與訊息內容相同的加密方式）
 	// 系統訊息不加密
 	encryptedLastMessage := lastMessagePreview
-	if req.Type != "system" {
+	if req.Type != systemSenderID {
 		encryptedLastMessage, err = s.encryption.EncryptMessage(lastMessagePreview, req.RoomId)
 		if err != nil {
 			logger.Error(ctx, "加密 last_message 失敗",
@@ -679,14 +699,14 @@ func (s *Server) SendMessage(ctx context.Context, req *chat.SendMessageRequest) 
 
 	// 解密內容給前端（與 GetMessages 保持一致）
 	responseContent := message.Content
-	if message.Type != "system" {
+	if message.Type != systemSenderID {
 		decrypted, err := s.encryption.DecryptMessage(message.Content, message.RoomID)
 		if err != nil {
 			logger.Warning(ctx, "返回消息時解密失敗",
 				logger.WithMessageID(message.GetID()),
 				logger.WithRoomID(message.RoomID),
 				logger.WithDetails(map[string]interface{}{"error": err.Error()}))
-			responseContent = "[解密失敗]"
+			responseContent = decryptFailedText
 		} else {
 			responseContent = decrypted
 		}
@@ -730,7 +750,7 @@ func (s *Server) GetMessages(ctx context.Context, req *chat.GetMessagesRequest) 
 	for i, msg := range messages {
 		// 系統訊息不需要解密（純文本）
 		decryptedContent := msg.Content
-		if msg.Type != "system" {
+		if msg.Type != systemSenderID {
 			// 只解密非系統訊息
 			var err error
 			decryptedContent, err = s.encryption.DecryptMessage(msg.Content, msg.RoomID)
@@ -739,7 +759,7 @@ func (s *Server) GetMessages(ctx context.Context, req *chat.GetMessagesRequest) 
 					logger.WithMessageID(msg.GetID()),
 					logger.WithRoomID(msg.RoomID),
 					logger.WithDetails(map[string]interface{}{"error": err.Error()}))
-				decryptedContent = "[解密失敗]"
+				decryptedContent = decryptFailedText
 			}
 		}
 
@@ -748,7 +768,7 @@ func (s *Server) GetMessages(ctx context.Context, req *chat.GetMessagesRequest) 
 			logger.Warning(ctx, "消息包含無效的 UTF-8 字符",
 				logger.WithMessageID(msg.GetID()),
 				logger.WithRoomID(msg.RoomID))
-			decryptedContent = "[訊息格式錯誤]"
+			decryptedContent = messageFormatErrorText
 		}
 
 		// 清理並轉換已讀信息（去重、排除發送者）
@@ -866,7 +886,7 @@ func (s *Server) StreamMessages(req *chat.StreamMessagesRequest, stream chat.Cha
 
 				// 系統訊息不需要解密（純文本）
 				decryptedContent := msg.Content
-				if msg.Type != "system" {
+				if msg.Type != systemSenderID {
 					// 只解密非系統訊息
 					var err error
 					decryptedContent, err = s.encryption.DecryptMessage(msg.Content, req.RoomId)
@@ -874,7 +894,7 @@ func (s *Server) StreamMessages(req *chat.StreamMessagesRequest, stream chat.Cha
 						logger.Error(ctx, "解密訊息失敗",
 							logger.WithMessageID(msgID),
 							logger.WithDetails(map[string]interface{}{"error": err.Error()}))
-						decryptedContent = "[解密失敗]"
+						decryptedContent = decryptFailedText
 					}
 				}
 
@@ -883,7 +903,7 @@ func (s *Server) StreamMessages(req *chat.StreamMessagesRequest, stream chat.Cha
 					logger.Warning(ctx, "SSE 推送的消息包含無效的 UTF-8 字符",
 						logger.WithMessageID(msgID),
 						logger.WithRoomID(req.RoomId))
-					decryptedContent = "[訊息格式錯誤]"
+					decryptedContent = messageFormatErrorText
 				}
 
 				// 轉換 read_by
