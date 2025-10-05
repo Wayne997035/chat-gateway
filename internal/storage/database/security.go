@@ -50,49 +50,43 @@ func ValidateQueryOperators(query interface{}) error {
 	switch v := query.(type) {
 	case bson.M:
 		for key := range v {
-			if strings.HasPrefix(key, "$") {
-				// 只允許白名單中的操作符
-				allowedOps := map[string]bool{
-					"$eq":  true,
-					"$ne":  true,
-					"$gt":  true,
-					"$gte": true,
-					"$lt":  true,
-					"$lte": true,
-					"$in":  true,
-					"$nin": true,
-					"$and": true,
-					"$or":  true,
-				}
-
-				if !allowedOps[key] {
-					return fmt.Errorf("不允許的查詢操作符: %s", key)
-				}
+			if err := validateOperator(key); err != nil {
+				return err
 			}
 		}
 	case map[string]interface{}:
 		for key := range v {
-			if strings.HasPrefix(key, "$") {
-				allowedOps := map[string]bool{
-					"$eq":  true,
-					"$ne":  true,
-					"$gt":  true,
-					"$gte": true,
-					"$lt":  true,
-					"$lte": true,
-					"$in":  true,
-					"$nin": true,
-					"$and": true,
-					"$or":  true,
-				}
-
-				if !allowedOps[key] {
-					return fmt.Errorf("不允許的查詢操作符: %s", key)
-				}
+			if err := validateOperator(key); err != nil {
+				return err
 			}
 		}
 	}
+	return nil
+}
 
+// validateOperator 驗證單個操作符是否在白名單中
+func validateOperator(key string) error {
+	if !strings.HasPrefix(key, "$") {
+		return nil
+	}
+
+	// 只允許白名單中的操作符
+	allowedOps := map[string]bool{
+		"$eq":  true,
+		"$ne":  true,
+		"$gt":  true,
+		"$gte": true,
+		"$lt":  true,
+		"$lte": true,
+		"$in":  true,
+		"$nin": true,
+		"$and": true,
+		"$or":  true,
+	}
+
+	if !allowedOps[key] {
+		return fmt.Errorf("不允許的查詢操作符: %s", key)
+	}
 	return nil
 }
 

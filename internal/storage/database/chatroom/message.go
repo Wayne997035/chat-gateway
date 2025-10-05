@@ -21,7 +21,14 @@ type MessageRepository interface {
 	MarkAsRead(ctx context.Context, roomID, userID string, messageID *string) error
 	MarkAsDelivered(ctx context.Context, roomID, userID string, messageID *string) error
 	GetUnreadCount(ctx context.Context, userID string, roomID *string) (int, error)
-	Search(ctx context.Context, roomID, query string, userID *string, messageType *string, since, until *time.Time, limit int, cursor string) ([]*Message, string, bool, int, error)
+	Search(
+		ctx context.Context,
+		roomID, query string,
+		userID, messageType *string,
+		since, until *time.Time,
+		limit int,
+		cursor string,
+	) (messages []*Message, nextCursor string, hasMore bool, totalCount int, err error)
 }
 
 // Message 消息數據模型
@@ -124,7 +131,7 @@ func (s *MessageStore) Create(ctx context.Context, message *Message) error {
 
 // GetByID 根據 ID 獲取消息
 func (s *MessageStore) GetByID(ctx context.Context, id string) (*Message, error) {
-	objectID, err := bson.ObjectIDFromHex(id)
+	objectID, err := parseObjectID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -134,107 +141,42 @@ func (s *MessageStore) GetByID(ctx context.Context, id string) (*Message, error)
 	if err != nil {
 		return nil, err
 	}
-
 	return &message, nil
 }
 
 // GetByRoomID 根據聊天室 ID 獲取消息
-func (s *MessageStore) GetByRoomID(ctx context.Context, roomID string, limit int, cursor string, since, until *time.Time) ([]*Message, string, bool, error) {
-	// 從配置讀取限制
-	cfg := config.Get()
-	defaultLimit := 20
-	maxLimit := 100
-	if cfg != nil {
-		if cfg.Limits.Pagination.DefaultPageSize > 0 {
-			defaultLimit = cfg.Limits.Pagination.DefaultPageSize
-		}
-		if cfg.Limits.MongoDB.MaxQueryLimit > 0 {
-			maxLimit = cfg.Limits.MongoDB.MaxQueryLimit
-		}
-	}
+func (s *MessageStore) GetByRoomID(
+	ctx context.Context,
+	roomID string,
+	limit int,
+	cursor string,
+	since, until *time.Time,
+) (messages []*Message, nextCursor string, hasMore bool, err error) {
+	// 標準化分頁限制
+	limit = normalizePaginationLimit(limit)
 
-	// 限制分頁大小，防止性能問題
-	if limit <= 0 {
-		limit = defaultLimit
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
+	// 構建查詢過濾條件
+	filter := buildMessageFilter(roomID, cursor, since, until)
 
-	filter := bson.M{"room_id": roomID}
+	// 構建查詢選項
+	opts := buildMessageFindOptions(limit)
 
-	// 添加時間範圍過濾
-	if since != nil {
-		filter["created_at"] = bson.M{"$gte": *since}
-	}
-	if until != nil {
-		if filter["created_at"] == nil {
-			filter["created_at"] = bson.M{"$lte": *until}
-		} else {
-			filter["created_at"].(bson.M)["$lte"] = *until
-		}
-	}
-
-	// 如果有游標，添加游標條件（查找比游標時間更早的訊息）
-	if cursor != "" {
-		cursorTime, err := time.Parse(time.RFC3339, cursor)
-		if err == nil {
-			filter["created_at"] = bson.M{"$lt": cursorTime}
-		}
-	}
-
-	opts := options.Find()
-	opts.SetLimit(int64(limit + 1))                      // 多取一個用於判斷是否有更多
-	opts.SetSort(bson.D{{Key: "created_at", Value: -1}}) // 按創建時間倒序排列（新消息在前）
-	opts.SetProjection(bson.M{                           // 只選擇需要的字段，減少網絡傳輸
-		"_id":                 1,
-		"id":                  1,
-		"room_id":             1,
-		"sender_id":           1,
-		"content":             1,
-		"type":                1,
-		"status":              1,
-		"created_at":          1,
-		"updated_at":          1,
-		"read_by":             1,
-		"delivered_to":        1,
-		"metadata":            1,
-		"reply_to_message_id": 1,
-		"forwarded_from":      1,
-	})
-
-	cursorResult, err := s.collection.Find(ctx, filter, opts)
+	// 執行查詢
+	messages, err = s.executeMessageQuery(ctx, filter, opts)
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer cursorResult.Close(ctx)
 
-	var messages []*Message
-	for cursorResult.Next(ctx) {
-		var message Message
-		if err := cursorResult.Decode(&message); err != nil {
-			return nil, "", false, err
-		}
-		messages = append(messages, &message)
-	}
-
-	// 檢查是否有更多數據
-	hasMore := len(messages) > limit
-	if hasMore {
-		messages = messages[:limit] // 移除多取的那一個
-	}
-
-	// 生成下一個游標
-	var nextCursor string
-	if hasMore && len(messages) > 0 {
-		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
-	}
+	// 處理分頁結果
+	messages, hasMore, nextCursor = s.processPaginationResult(messages, limit)
 
 	return messages, nextCursor, hasMore, nil
 }
 
 // GetHistoryMessages 獲取歷史消息（優化版本）
-func (s *MessageStore) GetHistoryMessages(ctx context.Context, roomID string, limit int, cursor string) ([]*Message, string, bool, error) {
+func (s *MessageStore) GetHistoryMessages(
+	ctx context.Context, roomID string, limit int, cursor string,
+) (messages []*Message, nextCursor string, hasMore bool, err error) {
 	// 從配置讀取限制
 	cfg := config.Get()
 	defaultLimit := 20
@@ -293,7 +235,7 @@ func (s *MessageStore) GetHistoryMessages(ctx context.Context, roomID string, li
 	}
 	defer cursorResult.Close(ctx)
 
-	var messages []*Message
+	messages = []*Message{}
 	for cursorResult.Next(ctx) {
 		var message Message
 		if err := cursorResult.Decode(&message); err != nil {
@@ -303,13 +245,12 @@ func (s *MessageStore) GetHistoryMessages(ctx context.Context, roomID string, li
 	}
 
 	// 檢查是否有更多數據
-	hasMore := len(messages) > limit
+	hasMore = len(messages) > limit
 	if hasMore {
 		messages = messages[:limit]
 	}
 
 	// 生成下一個游標
-	var nextCursor string
 	if hasMore && len(messages) > 0 {
 		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
 	}
@@ -380,11 +321,10 @@ func (s *MessageStore) Update(ctx context.Context, id string, update map[string]
 
 // Delete 刪除消息
 func (s *MessageStore) Delete(ctx context.Context, id string) error {
-	objectID, err := bson.ObjectIDFromHex(id)
+	objectID, err := parseObjectID(id)
 	if err != nil {
 		return err
 	}
-
 	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err
 }
@@ -462,7 +402,14 @@ func (s *MessageStore) GetUnreadCount(ctx context.Context, userID string, roomID
 }
 
 // Search 搜索消息
-func (s *MessageStore) Search(ctx context.Context, roomID, query string, userID *string, messageType *string, since, until *time.Time, limit int, cursor string) ([]*Message, string, bool, int, error) {
+func (s *MessageStore) Search(
+	ctx context.Context,
+	roomID, query string,
+	userID, messageType *string,
+	since, until *time.Time,
+	limit int,
+	cursor string,
+) (messages []*Message, nextCursor string, hasMore bool, totalCount int, err error) {
 	filter := bson.M{
 		"room_id": roomID,
 		"$text":   bson.M{"$search": query},
@@ -508,7 +455,7 @@ func (s *MessageStore) Search(ctx context.Context, roomID, query string, userID 
 	}
 	defer cursorResult.Close(ctx)
 
-	var messages []*Message
+	messages = []*Message{}
 	for cursorResult.Next(ctx) {
 		var message Message
 		if decodeErr := cursorResult.Decode(&message); decodeErr != nil {
@@ -518,22 +465,132 @@ func (s *MessageStore) Search(ctx context.Context, roomID, query string, userID 
 	}
 
 	// 檢查是否有更多數據
-	hasMore := len(messages) > limit
+	hasMore = len(messages) > limit
 	if hasMore {
 		messages = messages[:limit] // 移除多取的那一個
 	}
 
 	// 生成下一個游標
-	var nextCursor string
 	if hasMore && len(messages) > 0 {
 		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
 	}
 
 	// 獲取總數
-	totalCount, err := s.collection.CountDocuments(ctx, filter)
+	countResult, err := s.collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, "", false, 0, err
 	}
+	totalCount = int(countResult)
 
-	return messages, nextCursor, hasMore, int(totalCount), nil
+	return messages, nextCursor, hasMore, totalCount, nil
+}
+
+// normalizePaginationLimit 標準化分頁限制
+func normalizePaginationLimit(limit int) int {
+	cfg := config.Get()
+	defaultLimit := 20
+	maxLimit := 100
+	if cfg != nil {
+		if cfg.Limits.Pagination.DefaultPageSize > 0 {
+			defaultLimit = cfg.Limits.Pagination.DefaultPageSize
+		}
+		if cfg.Limits.MongoDB.MaxQueryLimit > 0 {
+			maxLimit = cfg.Limits.MongoDB.MaxQueryLimit
+		}
+	}
+
+	if limit <= 0 {
+		return defaultLimit
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
+// buildMessageFilter 構建消息查詢過濾條件
+func buildMessageFilter(roomID, cursor string, since, until *time.Time) bson.M {
+	filter := bson.M{"room_id": roomID}
+
+	// 添加時間範圍過濾
+	if since != nil {
+		filter["created_at"] = bson.M{"$gte": *since}
+	}
+	if until != nil {
+		if filter["created_at"] == nil {
+			filter["created_at"] = bson.M{"$lte": *until}
+		} else {
+			filter["created_at"].(bson.M)["$lte"] = *until
+		}
+	}
+
+	// 如果有游標，添加游標條件
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339, cursor)
+		if err == nil {
+			filter["created_at"] = bson.M{"$lt": cursorTime}
+		}
+	}
+
+	return filter
+}
+
+// buildMessageFindOptions 構建消息查詢選項
+func buildMessageFindOptions(limit int) *options.FindOptionsBuilder {
+	return options.Find().
+		SetLimit(int64(limit + 1)).                      // 多取一個用於判斷是否有更多
+		SetSort(bson.D{{Key: "created_at", Value: -1}}). // 按創建時間倒序排列
+		SetProjection(bson.M{
+			"_id":                 1,
+			"id":                  1,
+			"room_id":             1,
+			"sender_id":           1,
+			"content":             1,
+			"type":                1,
+			"status":              1,
+			"created_at":          1,
+			"updated_at":          1,
+			"read_by":             1,
+			"delivered_to":        1,
+			"metadata":            1,
+			"reply_to_message_id": 1,
+			"forwarded_from":      1,
+		})
+}
+
+// executeMessageQuery 執行消息查詢
+func (s *MessageStore) executeMessageQuery(ctx context.Context, filter bson.M, opts *options.FindOptionsBuilder) ([]*Message, error) {
+	cursorResult, err := s.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursorResult.Close(ctx)
+
+	messages := []*Message{}
+	for cursorResult.Next(ctx) {
+		var message Message
+		if err := cursorResult.Decode(&message); err != nil {
+			return nil, err
+		}
+		messages = append(messages, &message)
+	}
+	return messages, nil
+}
+
+// processPaginationResult 處理分頁結果
+func (s *MessageStore) processPaginationResult(
+	messages []*Message,
+	limit int,
+) (resultMessages []*Message, hasMore bool, nextCursor string) {
+	hasMore = len(messages) > limit
+	if hasMore {
+		messages = messages[:limit]
+	}
+
+	if hasMore && len(messages) > 0 {
+		nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	resultMessages = messages
+	return resultMessages, hasMore, nextCursor
 }

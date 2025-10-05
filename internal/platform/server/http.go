@@ -28,7 +28,9 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 		c.Header("X-XSS-Protection", "1; mode=block")
 
 		// 內容安全策略
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';")
+		csp := "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+			"img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';"
+		c.Header("Content-Security-Policy", csp)
 
 		// 強制 HTTPS（生產環境）
 		// c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
@@ -47,19 +49,46 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 func Router() *gin.Engine {
 	r := gin.Default()
 
-	// 添加安全的 CORS 中間件
-	r.Use(func(c *gin.Context) {
+	setupMiddleware(r)
+
+	rateLimiter := setupRateLimiter()
+	r.Use(rateLimiter.Middleware())
+
+	sseLimiter := setupSSELimiter()
+
+	registerRoutes(r, sseLimiter)
+
+	return r
+}
+
+// setupMiddleware 設置所有中間件
+func setupMiddleware(r *gin.Engine) {
+	r.Use(corsMiddleware())
+	r.Use(middleware.RequestIDMiddleware())
+	r.Use(securityHeadersMiddleware())
+	r.Use(middleware.RequestMetadataMiddleware())
+
+	cfg := config.Get()
+	maxMemory := int64(10 << 20) // 默認 10MB
+	if cfg != nil && cfg.Limits.Request.MaxMultipartMemory > 0 {
+		maxMemory = cfg.Limits.Request.MaxMultipartMemory
+	}
+	r.MaxMultipartMemory = maxMemory
+}
+
+// corsMiddleware CORS 中間件
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		// 只允許特定的來源（生產環境應該從配置文件讀取）
 		allowedOrigins := map[string]bool{
-			"http://localhost:3000":                        true, // 開發環境前端
-			"http://localhost:8080":                        true, // 本地測試
-			"http://127.0.0.1:5500":                        true, // Live Server
-			"http://127.0.0.1:8080":                        true, // 本地測試 (127.0.0.1)
-			"http://localhost:5500":                        true, // Live Server (localhost)
-			"https://thunderous-eclair-edba87.netlify.app": true, // Netlify 部署
-			"https://yourdomain.com":                       true, // 生產環境（請修改為實際域名）
+			"http://localhost:3000":                        true,
+			"http://localhost:8080":                        true,
+			"http://127.0.0.1:5500":                        true,
+			"http://127.0.0.1:8080":                        true,
+			"http://localhost:5500":                        true,
+			"https://thunderous-eclair-edba87.netlify.app": true,
+			"https://yourdomain.com":                       true,
 		}
 
 		if allowedOrigins[origin] {
@@ -69,7 +98,7 @@ func Router() *gin.Engine {
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
-		c.Header("Access-Control-Max-Age", "86400") // 預檢請求緩存 24 小時
+		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -77,35 +106,20 @@ func Router() *gin.Engine {
 		}
 
 		c.Next()
-	})
+	}
+}
 
-	// 添加請求 ID 中間件（最優先）
-	r.Use(middleware.RequestIDMiddleware())
-
-	// 添加安全標頭中間件
-	r.Use(securityHeadersMiddleware())
-
-	// 添加請求元數據中間件（提取 IP、User-Agent）
-	r.Use(middleware.RequestMetadataMiddleware())
-
-	// 從配置讀取限制參數
+// setupRateLimiter 設置速率限制器
+func setupRateLimiter() *middleware.PerEndpointRateLimiter {
 	cfg := config.Get()
 
-	// 添加請求大小限制（防止大文件攻擊）
-	maxMemory := int64(10 << 20) // 默認 10MB
-	if cfg != nil && cfg.Limits.Request.MaxMultipartMemory > 0 {
-		maxMemory = cfg.Limits.Request.MaxMultipartMemory
-	}
-	r.MaxMultipartMemory = maxMemory
-
-	// 創建 Rate Limiter
 	defaultLimit := 100
 	if cfg != nil && cfg.Limits.RateLimiting.DefaultPerMinute > 0 {
 		defaultLimit = cfg.Limits.RateLimiting.DefaultPerMinute
 	}
+
 	rateLimiter := middleware.NewPerEndpointRateLimiter(defaultLimit, time.Minute)
 
-	// 為不同端點設置不同的速率限制
 	if cfg != nil && cfg.Limits.RateLimiting.Enabled {
 		if cfg.Limits.RateLimiting.MessagesPerMin > 0 {
 			rateLimiter.SetLimit("/api/v1/messages", cfg.Limits.RateLimiting.MessagesPerMin, time.Minute)
@@ -118,32 +132,39 @@ func Router() *gin.Engine {
 		}
 	}
 
-	// 應用 Rate Limiting 中間件
-	r.Use(rateLimiter.Middleware())
+	return rateLimiter
+}
 
-	// 創建 SSE 連接限制器（從配置讀取，支持 0 值）
-	sseMaxPerIP := 50     // 默認值
-	sseInterval := 0      // 默認值（0 表示不限制間隔）
-	sseMaxTotal := 100000 // 默認值
+// setupSSELimiter 設置 SSE 連接限制器
+func setupSSELimiter() *middleware.SSEConnectionLimiter {
+	cfg := config.Get()
+
+	sseMaxPerIP := 50
+	sseInterval := 0
+	sseMaxTotal := 100000
+
 	if cfg != nil && cfg.Limits.SSE.MaxConnectionsPerIP > 0 {
 		sseMaxPerIP = cfg.Limits.SSE.MaxConnectionsPerIP
 	}
 	if cfg != nil {
-		// MinConnectionInterval 允許為 0（表示不限制切換速度）
 		sseInterval = cfg.Limits.SSE.MinConnectionInterval
 	}
 	if cfg != nil && cfg.Limits.SSE.MaxTotalConnections > 0 {
 		sseMaxTotal = cfg.Limits.SSE.MaxTotalConnections
 	}
-	sseLimiter := middleware.NewSSEConnectionLimiter(sseMaxPerIP, time.Duration(sseInterval)*time.Second, sseMaxTotal)
 
-	// 創建處理器
+	return middleware.NewSSEConnectionLimiter(
+		sseMaxPerIP,
+		time.Duration(sseInterval)*time.Second,
+		sseMaxTotal,
+	)
+}
+
+// registerRoutes 註冊所有路由
+func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter) {
 	healthHandler := health.NewHealthHandler()
-
-	// health check
 	r.GET("/health", healthHandler.HealthCheck)
 
-	// 添加聊天室 API 路由
 	r.POST("/api/v1/rooms", createRoom)
 	r.GET("/api/v1/rooms", listUserRooms)
 	r.POST("/api/v1/rooms/:room_id/members", addRoomMember)
@@ -152,10 +173,7 @@ func Router() *gin.Engine {
 	r.GET("/api/v1/messages", getMessages)
 	r.POST("/api/v1/messages/read", markAsRead)
 
-	// SSE endpoint - 應用額外的連接限制
 	r.GET("/api/v1/messages/stream", sseLimiter.Middleware(), streamMessages)
-
-	return r
 }
 
 // 創建聊天室

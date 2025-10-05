@@ -99,7 +99,7 @@ func (s *ChatRoomStore) Create(ctx context.Context, room *ChatRoom) error {
 
 // GetByID 根據 ID 獲取聊天室
 func (s *ChatRoomStore) GetByID(ctx context.Context, id string) (*ChatRoom, error) {
-	objectID, err := bson.ObjectIDFromHex(id)
+	objectID, err := parseObjectID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,6 @@ func (s *ChatRoomStore) GetByID(ctx context.Context, id string) (*ChatRoom, erro
 	if err != nil {
 		return nil, err
 	}
-
 	return &room, nil
 }
 
@@ -122,17 +121,25 @@ func (s *ChatRoomStore) Update(ctx context.Context, id string, update map[string
 
 // Delete 刪除聊天室
 func (s *ChatRoomStore) Delete(ctx context.Context, id string) error {
-	objectID, err := bson.ObjectIDFromHex(id)
+	objectID, err := parseObjectID(id)
 	if err != nil {
 		return err
 	}
-
 	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err
 }
 
-// ListUserRooms 列出用戶的聊天室
-func (s *ChatRoomStore) ListUserRooms(ctx context.Context, userID string, limit int, cursor string) (rooms []*ChatRoom, nextCursor string, hasMore bool, err error) {
+// parseObjectID 是轉換字符串 ID 為 ObjectID 的輔助函數
+func parseObjectID(id string) (bson.ObjectID, error) {
+	return bson.ObjectIDFromHex(id)
+}
+
+// ListUserRooms 列出用戶的聊天室.
+func (s *ChatRoomStore) ListUserRooms(
+	ctx context.Context, userID string, limit int, cursor string,
+) (
+	rooms []*ChatRoom, nextCursor string, hasMore bool, err error,
+) {
 	filter := bson.M{
 		"members.user_id": userID,
 	}

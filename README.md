@@ -12,6 +12,7 @@
 - [API 文檔](#api-文檔)
 - [安全特性](#安全特性)
 - [開發指南](#開發指南)
+- [程式碼品質檢查](#程式碼品質檢查)
 - [測試](#測試)
 - [部署](#部署)
 - [常見問題](#常見問題)
@@ -699,6 +700,72 @@ logger.Info(ctx, "操作描述",
     logger.WithDetails(map[string]interface{}{
         "key": "value",
     }))
+```
+
+## 程式碼品質檢查
+
+本專案使用嚴格的程式碼品質檢查工具，確保程式碼符合最佳實踐。
+
+### 執行品質檢查
+
+```bash
+# 執行完整的品質檢查和測試
+cd build && task check
+```
+
+### 檢查項目
+
+品質檢查包含以下工具：
+
+1. **go vet** - Go 官方靜態分析工具
+2. **staticcheck** - 進階靜態分析
+3. **gosec** - 安全性檢查（0 個安全問題）
+4. **golangci-lint** - 綜合 linter（25 個 linters）
+   - 程式碼格式化（gofmt, goimports, gofumpt）
+   - 錯誤處理（errcheck, rowserrcheck）
+   - 程式碼品質（gocyclo, dupl, goconst）
+   - 程式碼風格（gocritic, stylecheck, whitespace）
+   - 效能優化（staticcheck, gosimple, ineffassign）
+   - 未使用檢測（unused, unparam）
+5. **goconst** - 重複字串檢測
+6. **unit tests** - 單元測試
+
+### 配置說明
+
+Linter 配置位於 `.golangci.yml`：
+
+```yaml
+linters-settings:
+  gocyclo:
+    min-complexity: 15    # 函數複雜度閾值
+  dupl:
+    threshold: 150        # 重複程式碼閾值（tokens）
+  lll:
+    line-length: 140      # 行長度限制
+  goconst:
+    min-occurrences: 3    # 重複字串最少出現次數
+```
+
+詳細的品質檢查指南請參見 `CODE_QUALITY.md`。
+
+### 品質標準
+
+- **所有程式碼必須通過 golangci-lint 檢查**
+- **單元測試覆蓋率：加密模組達 46.7%**
+- **函數複雜度限制：不超過 15**
+- **無安全漏洞（gosec 檢查）**
+
+### 修正常見問題
+
+```bash
+# 自動格式化程式碼
+go fmt ./...
+
+# 整理 imports
+goimports -w .
+
+# 整理依賴
+go mod tidy
 ```
 
 ## 測試

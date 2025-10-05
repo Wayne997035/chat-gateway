@@ -185,19 +185,19 @@ func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte,
 }
 
 // rotateKey 輪換密鑰（保存到 DB）
-func (km *KeyManagerWithPersistence) rotateKey(roomID string) ([]byte, error) {
+func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
 	oldKey, exists := km.keys[roomID]
 	if !exists {
-		return nil, fmt.Errorf("key not found for room %s", roomID)
+		return fmt.Errorf("key not found for room %s", roomID)
 	}
 
 	// 生成新密鑰
 	newKeyValue := make([]byte, 32)
 	if _, err := rand.Read(newKeyValue); err != nil {
-		return nil, fmt.Errorf("key generation error")
+		return fmt.Errorf("key generation error")
 	}
 
 	// 使用完後清零（安全增強）
@@ -223,7 +223,7 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) ([]byte, error) {
 	// 用 Master Key 加密新的 Room Key
 	encryptedKey, err := km.encryptRoomKey(newKeyValue)
 	if err != nil {
-		return nil, fmt.Errorf("key encryption error")
+		return fmt.Errorf("key encryption error")
 	}
 
 	// 保存新密鑰到數據庫
@@ -239,7 +239,7 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) ([]byte, error) {
 
 	ctx := context.Background()
 	if err := km.store.SaveKey(ctx, newKeyDoc); err != nil {
-		return nil, fmt.Errorf("key persistence error")
+		return fmt.Errorf("key persistence error")
 	}
 
 	// 清零舊密鑰值（安全增強）
@@ -260,11 +260,7 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) ([]byte, error) {
 	// 更新當前密鑰
 	km.keys[roomID] = newKey
 
-	// 複製密鑰值以返回（安全增強）
-	keyValueCopy := make([]byte, len(newKeyValue))
-	copy(keyValueCopy, newKeyValue)
-
-	return keyValueCopy, nil
+	return nil
 }
 
 // encryptRoomKey 用 Master Key 加密 Room Key
@@ -490,7 +486,7 @@ func (km *KeyManagerWithPersistence) checkAndRotateKeys() {
 
 	// 輪換需要輪換的密鑰
 	for _, roomID := range keysToRotate {
-		if _, err := km.rotateKey(roomID); err != nil {
+		if err := km.rotateKey(roomID); err != nil {
 			fmt.Printf("Failed to rotate key for room %s: %v\n", roomID, err)
 		} else {
 			fmt.Printf("Successfully rotated key for room %s\n", roomID)
@@ -508,8 +504,7 @@ func (km *KeyManagerWithPersistence) ForceRotateKey(roomID string) error {
 		return fmt.Errorf("key not found for room %s", roomID)
 	}
 
-	_, err := km.rotateKey(roomID)
-	return err
+	return km.rotateKey(roomID)
 }
 
 // Stats 獲取統計信息

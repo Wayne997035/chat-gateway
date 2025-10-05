@@ -283,7 +283,7 @@ func (sp *SignalProtocol) DecryptMessage(sessionID string, encryptedMessage []by
 // deriveMessageKey 導出消息密鑰
 func (sp *SignalProtocol) deriveMessageKey(chainKey *ChainKey) (*MessageKey, error) {
 	// 使用 HKDF 導出消息密鑰
-	messageKeyBytes := make([]byte, 80) // 32 + 32 + 16 = 80 bytes
+	messageKeyBytes := make([]byte, 76) // 32 + 32 + 12 = 76 bytes (GCM nonce 必須 12 bytes)
 	_, err := hkdf.New(sha256.New, chainKey.Key, nil, []byte("MessageKey")).Read(messageKeyBytes)
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func (sp *SignalProtocol) deriveMessageKey(chainKey *ChainKey) (*MessageKey, err
 	// 分割密鑰
 	cipherKey := messageKeyBytes[:32]
 	macKey := messageKeyBytes[32:64]
-	iv := messageKeyBytes[64:80]
+	iv := messageKeyBytes[64:76] // GCM nonce = 12 bytes
 
 	return &MessageKey{
 		CipherKey: cipherKey,
@@ -303,7 +303,7 @@ func (sp *SignalProtocol) deriveMessageKey(chainKey *ChainKey) (*MessageKey, err
 
 // createMessageHeader 創建消息頭
 func (sp *SignalProtocol) createMessageHeader(sessionID string, messageNumber uint32, messageKey *MessageKey) []byte {
-	header := make([]byte, 4+32+16) // 4 bytes for message number + 32 bytes for MAC + 16 bytes for IV
+	header := make([]byte, 4+32+12) // 4 bytes for message number + 32 bytes for MAC + 12 bytes for GCM nonce
 
 	// 消息編號
 	binary.BigEndian.PutUint32(header[0:4], messageNumber)
@@ -312,22 +312,23 @@ func (sp *SignalProtocol) createMessageHeader(sessionID string, messageNumber ui
 	mac := sp.computeMAC(messageKey.MacKey, []byte(sessionID), messageNumber)
 	copy(header[4:36], mac)
 
-	// IV
-	copy(header[36:52], messageKey.IV)
+	// GCM nonce (12 bytes)
+	copy(header[36:48], messageKey.IV)
 
 	return header
 }
 
 // parseMessageHeader 解析消息頭
 func (sp *SignalProtocol) parseMessageHeader(encryptedMessage []byte) (*MessageHeader, []byte, error) {
-	if len(encryptedMessage) < 52 { // 最小消息頭長度
+	const minHeaderSize = 48 // message number(4) + MAC(32) + GCM nonce(12)
+	if len(encryptedMessage) < minHeaderSize {
 		return nil, nil, fmt.Errorf("message too short")
 	}
 
 	messageNumber := binary.BigEndian.Uint32(encryptedMessage[0:4])
 	mac := encryptedMessage[4:36]
-	iv := encryptedMessage[36:52]
-	ciphertext := encryptedMessage[52:]
+	iv := encryptedMessage[36:48] // GCM nonce (12 bytes)
+	ciphertext := encryptedMessage[48:]
 
 	return &MessageHeader{
 		MessageNumber: messageNumber,

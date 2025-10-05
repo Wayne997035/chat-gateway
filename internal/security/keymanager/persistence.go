@@ -126,17 +126,7 @@ func (ks *KeyStore) GetActiveKey(ctx context.Context, roomID string) (*KeyDocume
 		"room_id":   roomID,
 		"is_active": true,
 	}
-
-	var doc KeyDocument
-	err := ks.collection.FindOne(ctx, filter).Decode(&doc)
-	if err == mongo.ErrNoDocuments {
-		return nil, nil // 沒有找到密鑰
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active key: %w", err)
-	}
-
-	return &doc, nil
+	return ks.findOneKey(ctx, filter, "failed to get active key")
 }
 
 // GetKeyByVersion 根據版本號獲取密鑰
@@ -145,16 +135,19 @@ func (ks *KeyStore) GetKeyByVersion(ctx context.Context, roomID string, version 
 		"room_id":     roomID,
 		"key_version": version,
 	}
+	return ks.findOneKey(ctx, filter, "failed to get key by version")
+}
 
+// findOneKey 是查詢單個密鑰的輔助函數
+func (ks *KeyStore) findOneKey(ctx context.Context, filter bson.M, errMsg string) (*KeyDocument, error) {
 	var doc KeyDocument
 	err := ks.collection.FindOne(ctx, filter).Decode(&doc)
 	if err == mongo.ErrNoDocuments {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get key by version: %w", err)
+		return nil, fmt.Errorf("%s: %w", errMsg, err)
 	}
-
 	return &doc, nil
 }
 

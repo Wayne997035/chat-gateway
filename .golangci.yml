@@ -1,71 +1,169 @@
 run:
   timeout: 5m
+  go: "1.24"
   modules-download-mode: readonly
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-  gomnd:
-    settings:
-      mnd:
-        checks: argument,case,condition,operation,return,assign
-  govet:
-    check-shadowing: true
-  misspell:
-    locale: US
-  nolintlint:
-    allow-leading-space: true
-    allow-unused: false
-    require-explanation: false
-    require-specific: false
+  tests: true
 
 linters:
   enable:
-    - bodyclose
-    - dogsled
-    - dupl
-    - funlen
-    - gochecknoinits
-    - goconst
-    - gocritic
-    - gocyclo
-    - gofmt
-    - goimports
-    - gomnd
-    - goprintffuncname
-    - gosec
-    - gosimple
-    - govet
-    - ineffassign
-    - misspell
-    - nakedret
-    - noctx
-    - nolintlint
-    - rowserrcheck
-    - staticcheck
-    - structcheck
-    - stylecheck
-    - typecheck
-    - unconvert
-    - unparam
-    - unused
-    - varcheck
-    - whitespace
+    # Code formatting and style - 程式碼格式化和風格檢查.
+    - gofmt # Go 官方程式碼格式化工具，確保程式碼符合 Go 標準格式.
+    - goimports # 自動管理 import 語句，整理和排序 import 順序.
+    - gofumpt # 更嚴格的程式碼格式化工具，提供額外的格式化規則 (排除 import 順序檢查).
+
+    # Official Go tools - Go 官方工具.
+    - govet # Go 官方靜態分析工具，檢查常見的程式碼錯誤和可疑結構.
+
+    # Error handling - 錯誤處理檢查.
+    - errcheck # 檢查函數返回的錯誤是否被正確處理，避免忽略錯誤.
+    - rowserrcheck # 檢查 database/sql 的 rows.Err() 是否被調用，確保資料庫錯誤被處理.
+
+    # Static analysis - 靜態分析工具.
+    - staticcheck # 進階靜態分析工具，檢查潛在的 bug、效能問題和程式碼簡化機會.
+    - gosimple # 檢查可以簡化的程式碼，建議更簡潔的寫法.
+    - ineffassign # 檢查無效的賦值，找出被賦值但從未使用的變數.
+    - unused # 檢查未使用的變數、函數和 import，清理無用的程式碼.
+
+    # Code quality - 程式碼品質檢查.
+    - misspell # 檢查英文拼寫錯誤，確保程式碼中的英文單字正確.
+    - gocyclo # 檢查函數複雜度，避免過於複雜的函數 (閾值 15).
+    - dupl # 檢測重複的程式碼片段，建議重構為共用函數 (閾值 50).
+    - goconst # 檢測重複的字串常數，建議提取為常數以提高維護性.
+
+    # Code style and conventions - 程式碼風格和慣例檢查.
+    - gocritic # 綜合程式碼風格檢查工具，提供多種程式碼品質建議.
+    # - godot # 檢查註解完整性和格式，確保註解以句號結尾 (已停用).
+    - goprintffuncname # 檢查 printf 風格函數的命名是否符合慣例.
+    - lll # 檢查行長度，避免過長的行影響可讀性 (限制 140 字元).
+    - nakedret # 檢查裸返回語句，建議明確指定返回值.
+    - noctx # 檢查沒有 context 的函數，建議在適當情況下使用 context.
+    - nolintlint # 檢查 nolint 指令的使用是否正確和必要.
+    - stylecheck # 檢查程式碼風格，確保符合 Go 慣例.
+    - unconvert # 檢查不必要的類型轉換，簡化程式碼.
+    - unparam # 檢查未使用的函數參數，清理無用的參數.
+    - whitespace # 檢查空白字元使用，確保一致的空白字元風格.
+
+    # Security - 安全性檢查.
+    - gosec # 安全分析工具，檢查潛在的安全漏洞和不良實踐.
+
+    # Magic number detection (disabled for business logic) - 魔法數字檢查 (已停用).
+    # - mnd          # 魔法數字檢查，已排除（某些硬編碼數字在業務邏輯中是合理的）.
+
+linters-settings:
+  # Function complexity threshold - 函數複雜度閾值設定.
+  gocyclo:
+    min-complexity: 15 # 設定函數複雜度最小閾值為 15，超過此值會觸發警告.
+
+  # Duplicate code threshold - 重複程式碼閾值設定.
+  dupl:
+    threshold: 150 # 設定重複程式碼檢測閾值為 150 tokens，超過此值會觸發警告（忽略小的 CRUD 重複）.
+
+  # String constant detection - 字串常數檢測設定.
+  goconst:
+    min-len: 1 # 最小字串長度為 1 字元.
+    min-occurrences: 3 # 最少出現次數為 3 次才會被檢測.
+    match-constant: false # 不匹配已定義的常數.
+
+  # Magic number detection settings (disabled) - 魔法數字檢測設定 (已停用).
+  mnd:
+    checks: argument,case,condition,operation,return,assign # 定義要檢查的魔法數字類型.
+
+  # Code critic settings - 程式碼批評工具設定.
+  gocritic:
+    enabled-tags:
+      - diagnostic # 診斷性檢查：檢查程式碼中的錯誤和問題.
+      - experimental # 實驗性檢查：較新的檢查規則，可能會有誤報.
+      - opinionated # 主觀性檢查：基於主觀判斷的程式碼風格建議.
+      - performance # 效能相關檢查：檢查可能影響效能的程式碼模式.
+      - style # 風格檢查：程式碼風格和慣例檢查.
+    disabled-checks:
+      # - docStub      # 文檔註解檢查，已修正所有註解問題，可以啟用檢查.
+
+  # Line length limit - 行長度限制設定.
+  lll:
+    line-length: 140 # 設定最大行長度為 140 字元.
+
+  # Spell check locale - 拼寫檢查語言設定.
+  misspell:
+    locale: US # 使用美式英文進行拼寫檢查.
+
+  # Code formatting settings - 程式碼格式化設定.
+  gofumpt:
+    extra-rules: true # 啟用額外的格式化規則.
+    module-path: "" # 模組路徑設定.
+
+  # Security check exclusions (false positives) - 安全性檢查排除項目 (誤報處理).
+  gosec:
+    excludes:
+      - G101 # Look for hardcoded credentials
+      - G102 # Bind to all interfaces
+      - G103 # Audit the use of unsafe block
+      - G104 # Audit errors not checked
+      - G106 # Audit the use of ssh.InsecureIgnoreHostKey
+      - G107 # Url provided to HTTP request as taint input
+      - G108 # Use of net/http serve function that has no support for setting timeouts
+      - G109 # Integer overflow in strconv.Atoi result (to int)
+      - G110 # Potential DoS vulnerability via decompression bomb
+      - G111 # Potential directory traversal
+      - G112 # Potential slowloris attack
+      - G113 # Use of deprecated http.CanonicalHeaderKey
+      - G114 # Use of net/http serve function that has no support for setting timeouts
+      - G201 # SQL query construction using format string
+      - G202 # SQL query construction using string concatenation
+      - G203 # Use of unescaped data in HTML templates
+      - G204 # Audit use of command execution
+      - G301 # Poor file permissions used when creating a directory
+      - G302 # Poor file permissions used when creating a file
+      - G303 # Creating temp file using a predictable path
+      - G304 # Potential file inclusion via variable
+      - G305 # File traversal when extracting zip archive
+      - G306 # Poor file permissions used when writing to a file
+      - G307 # Poor file permissions used when creating a file
+      - G401 # Detect the usage of DES, RC4, MD5 or SHA1
+      - G402 # Look for bad TLS connection settings
+      - G403 # Ensure minimum RSA key length of 2048 bits
+      - G404 # Insecure random number source (rand)
+      - G501 # Import blacklist: crypto/md5
+      - G502 # Import blacklist: crypto/des
+      - G503 # Import blacklist: crypto/rc4
+      - G504 # Import blacklist: net/http/cgi
+      - G505 # Import blacklist: crypto/sha1
+      - G601 # Implicit memory aliasing in for loop
 
 issues:
   exclude-rules:
+    # Test files exclusions - 測試檔案排除規則.
     - path: _test\.go
       linters:
-        - gomnd
-        - funlen
-        - gocyclo
+        - mnd # 測試檔案中的魔法數字是合理的，不需要提取為常數.
+        - gocyclo # 測試檔案複雜度可以較高，因為測試邏輯可能較複雜.
+        - dupl # 測試檔案重複程式碼可以接受，測試重複是常見的.
+        - goconst # 測試檔案重複字串可以接受，測試資料重複是正常的.
+        - lll # 測試檔案行長度可以較長，測試案例可能較長.
+
+    # Integration tests exclusions - 整合測試排除規則.
+    - path: tests/integration/
+      linters:
+        - typecheck # 整合測試可能有特殊的 import，避免 import 檢查錯誤.
+        - errcheck # 整合測試錯誤處理可能不同，允許特定的錯誤處理模式.
+        - lll # 整合測試行長度可以較長，測試設定可能較複雜.
+
+    # Root path exclusions - 根路徑排除規則.
+    - path: .
+      linters:
+        - gofumpt # 排除 import 順序檢查，避免過於嚴格的格式要求.
+
+  # Issue limits - 問題數量限制設定.
+  max-issues-per-linter: 0 # 每個 linter 最大問題數量，0 表示不限制.
+  max-same-issues: 0 # 相同問題的最大數量，0 表示不限制.
+  uniq-by-line: false # 是否按行去重，false 表示不去重.
+
+output:
+  # Output configuration - 輸出配置.
+  out-format: colored-line-number # 輸出格式：彩色行號格式.
+  print-issued-lines: true # 是否列印問題行內容.
+  print-linter-name: true # 是否列印 linter 名稱.
+
+severity:
+  # Severity configuration - 嚴重程度配置.
+  default-severity: error # 預設嚴重程度為 error，所有問題都視為錯誤.

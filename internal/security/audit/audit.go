@@ -100,80 +100,26 @@ func (a *AuditService) LogMessageRead(ctx context.Context, userID, roomID, messa
 
 // LogRoomJoin 記錄加入聊天室
 func (a *AuditService) LogRoomJoin(ctx context.Context, userID, roomID string) {
-	if !a.enabled {
-		return
-	}
-
-	event := AuditEvent{
-		Timestamp: time.Now(),
-		EventType: "room_join",
-		UserID:    userID,
-		RoomID:    roomID,
-		Action:    "join_room",
-		Result:    "success",
-	}
-
-	a.log(&event)
+	a.logSimpleEvent("room_join", userID, roomID, "join_room", "success", nil)
 }
 
 // LogRoomLeave 記錄離開聊天室
 func (a *AuditService) LogRoomLeave(ctx context.Context, userID, roomID string) {
-	if !a.enabled {
-		return
-	}
-
-	event := AuditEvent{
-		Timestamp: time.Now(),
-		EventType: "room_leave",
-		UserID:    userID,
-		RoomID:    roomID,
-		Action:    "leave_room",
-		Result:    "success",
-	}
-
-	a.log(&event)
+	a.logSimpleEvent("room_leave", userID, roomID, "leave_room", "success", nil)
 }
 
 // LogMemberAdded 記錄添加成員
 func (a *AuditService) LogMemberAdded(ctx context.Context, operatorID, roomID, memberID string) {
-	if !a.enabled {
-		return
-	}
-
-	event := AuditEvent{
-		Timestamp: time.Now(),
-		EventType: "member_added",
-		UserID:    operatorID,
-		RoomID:    roomID,
-		Action:    "add_member",
-		Result:    "success",
-		Details: map[string]interface{}{
-			"member_id": memberID,
-		},
-	}
-
-	a.log(&event)
+	a.logSimpleEvent("member_added", operatorID, roomID, "add_member", "success", map[string]interface{}{
+		"member_id": memberID,
+	})
 }
 
 // LogMemberRemoved 記錄移除成員
 func (a *AuditService) LogMemberRemoved(ctx context.Context, operatorID, roomID, memberID string) {
-	if !a.enabled {
-		return
-	}
-
-	event := AuditEvent{
-		Timestamp: time.Now(),
-		EventType: "member_removed",
-		UserID:    operatorID,
-		RoomID:    roomID,
-		Action:    "remove_member",
-		Result:    "success",
-		Details: map[string]interface{}{
-			"member_id": memberID,
-		},
-	}
-
-	a.log(&event)
+	a.logSimpleEvent("member_removed", operatorID, roomID, "remove_member", "success", map[string]interface{}{
+		"member_id": memberID,
+	})
 }
 
 // LogAuthenticationFailure 記錄認證失敗
@@ -240,27 +186,17 @@ func (a *AuditService) LogSuspiciousActivity(ctx context.Context, userID, ipAddr
 
 // LogAccessDenied 記錄訪問被拒絕
 func (a *AuditService) LogAccessDenied(ctx context.Context, userID, roomID, reason string) {
-	if !a.enabled {
-		return
-	}
-
-	event := AuditEvent{
-		Timestamp: time.Now(),
-		EventType: "access_denied",
-		UserID:    userID,
-		RoomID:    roomID,
-		Action:    "access_resource",
-		Result:    "denied",
-		Details: map[string]interface{}{
-			"reason": reason,
-		},
-	}
-
-	a.log(&event)
+	a.logSimpleEvent("access_denied", userID, roomID, "access_resource", "denied", map[string]interface{}{
+		"reason": reason,
+	})
 }
 
-// LogDataModification 記錄數據修改
-func (a *AuditService) LogDataModification(ctx context.Context, userID, resourceType, resourceID, operation string, changes map[string]interface{}) {
+// LogDataModification 記錄數據修改.
+func (a *AuditService) LogDataModification(
+	ctx context.Context,
+	userID, resourceType, resourceID, operation string,
+	changes map[string]interface{},
+) {
 	if !a.enabled {
 		return
 	}
@@ -297,6 +233,25 @@ func (a *AuditService) LogSecurityEvent(ctx context.Context, eventType, descript
 			"severity":    severity,
 			"details":     details,
 		},
+	}
+
+	a.log(&event)
+}
+
+// logSimpleEvent 是處理簡單審計事件的輔助函數
+func (a *AuditService) logSimpleEvent(eventType, userID, roomID, action, result string, details map[string]interface{}) {
+	if !a.enabled {
+		return
+	}
+
+	event := AuditEvent{
+		Timestamp: time.Now(),
+		EventType: eventType,
+		UserID:    userID,
+		RoomID:    roomID,
+		Action:    action,
+		Result:    result,
+		Details:   details,
 	}
 
 	a.log(&event)

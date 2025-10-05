@@ -2,27 +2,149 @@ package grpcclient
 
 import (
 	"context"
+	"io"
+	"net"
 	"testing"
-	"time"
 
 	"chat-gateway/proto/chat"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
-const testRoomID = "room_123"
+const bufSize = 1024 * 1024
+
+var lis *bufconn.Listener
+
+// mockChatRoomService 實作 mock gRPC server
+type mockChatRoomService struct {
+	chat.UnimplementedChatRoomServiceServer
+}
+
+func (s *mockChatRoomService) CreateRoom(ctx context.Context, req *chat.CreateRoomRequest) (*chat.CreateRoomResponse, error) {
+	members := make([]*chat.RoomMember, len(req.MemberIds))
+	for i, memberID := range req.MemberIds {
+		members[i] = &chat.RoomMember{
+			UserId: memberID,
+			Role:   "member",
+		}
+	}
+
+	return &chat.CreateRoomResponse{
+		Success: true,
+		Message: "聊天室創建成功",
+		Room: &chat.ChatRoom{
+			Id:        "mock_room_123",
+			Name:      req.Name,
+			Type:      req.Type,
+			OwnerId:   req.OwnerId,
+			Members:   members,
+			CreatedAt: 1234567890,
+			UpdatedAt: 1234567890,
+		},
+	}, nil
+}
+
+func (s *mockChatRoomService) SendMessage(ctx context.Context, req *chat.SendMessageRequest) (*chat.SendMessageResponse, error) {
+	return &chat.SendMessageResponse{
+		Success: true,
+		Message: "消息發送成功",
+		ChatMessage: &chat.ChatMessage{
+			Id:        "mock_msg_123",
+			RoomId:    req.RoomId,
+			SenderId:  req.SenderId,
+			Content:   req.Content,
+			Type:      req.Type,
+			CreatedAt: 1234567890,
+			UpdatedAt: 1234567890,
+			ReadBy:    []string{},
+		},
+	}, nil
+}
+
+func (s *mockChatRoomService) GetMessages(ctx context.Context, req *chat.GetMessagesRequest) (*chat.GetMessagesResponse, error) {
+	messages := []*chat.ChatMessage{
+		{
+			Id:        "mock_msg_1",
+			RoomId:    req.RoomId,
+			SenderId:  "user_alice",
+			Content:   "測試消息 1",
+			Type:      "text",
+			CreatedAt: 1234567890,
+			UpdatedAt: 1234567890,
+			ReadBy:    []string{},
+		},
+	}
+
+	return &chat.GetMessagesResponse{
+		Success:  true,
+		Message:  "獲取消息成功",
+		Messages: messages,
+		HasMore:  false,
+	}, nil
+}
+
+func (s *mockChatRoomService) StreamMessages(req *chat.StreamMessagesRequest, stream chat.ChatRoomService_StreamMessagesServer) error {
+	// 模擬發送一條消息
+	msg := &chat.ChatMessage{
+		Id:        "mock_stream_msg",
+		RoomId:    req.RoomId,
+		SenderId:  "user_bob",
+		Content:   "流式消息測試",
+		Type:      "text",
+		CreatedAt: 1234567890,
+		UpdatedAt: 1234567890,
+		ReadBy:    []string{},
+	}
+
+	if err := stream.Send(msg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// bufDialer 用於測試的內存連接
+func bufDialer(context.Context, string) (net.Conn, error) {
+	return lis.Dial()
+}
+
+// setupMockServer 設置 mock gRPC server
+func setupMockServer(t *testing.T) *grpc.ClientConn {
+	lis = bufconn.Listen(bufSize)
+	s := grpc.NewServer()
+	chat.RegisterChatRoomServiceServer(s, &mockChatRoomService{})
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Errorf("Server exited with error: %v", err)
+		}
+	}()
+
+	conn, err := grpc.NewClient(
+		"passthrough://bufnet",
+		grpc.WithContextDialer(bufDialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("Failed to dial bufnet: %v", err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close()
+		s.Stop()
+		lis.Close()
+	})
+
+	return conn
+}
 
 // TestGRPCConnection 測試 gRPC 連接
 func TestGRPCConnection(t *testing.T) {
-	conn, err := grpc.NewClient("localhost:8081", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Skipf("跳過測試：無法連接到 gRPC 服務器: %v", err)
-		return
-	}
-	defer conn.Close()
-
+	conn := setupMockServer(t)
 	client := chat.NewChatRoomServiceClient(conn)
+
 	if client == nil {
 		t.Fatal("創建 gRPC 客戶端失敗")
 	}
@@ -30,13 +152,7 @@ func TestGRPCConnection(t *testing.T) {
 
 // TestDirectChat 測試一對一聊天
 func TestDirectChat(t *testing.T) {
-	conn, err := grpc.NewClient("localhost:8081", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Skipf("跳過測試：無法連接到 gRPC 服務器: %v", err)
-		return
-	}
-	defer conn.Close()
-
+	conn := setupMockServer(t)
 	client := chat.NewChatRoomServiceClient(conn)
 
 	req := &chat.CreateRoomRequest{
@@ -70,13 +186,7 @@ func TestDirectChat(t *testing.T) {
 
 // TestGroupChat 測試群組聊天
 func TestGroupChat(t *testing.T) {
-	conn, err := grpc.NewClient("localhost:8081", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Skipf("跳過測試：無法連接到 gRPC 服務器: %v", err)
-		return
-	}
-	defer conn.Close()
-
+	conn := setupMockServer(t)
 	client := chat.NewChatRoomServiceClient(conn)
 
 	req := &chat.CreateRoomRequest{
@@ -115,20 +225,14 @@ func TestGroupChat(t *testing.T) {
 
 // TestSendAndGetMessages 測試發送和獲取消息
 func TestSendAndGetMessages(t *testing.T) {
-	conn, err := grpc.NewClient("localhost:8081", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Skipf("跳過測試：無法連接到 gRPC 服務器: %v", err)
-		return
-	}
-	defer conn.Close()
-
+	conn := setupMockServer(t)
 	client := chat.NewChatRoomServiceClient(conn)
 
 	// 發送消息
 	sendReq := &chat.SendMessageRequest{
-		RoomId:   testRoomID,
+		RoomId:   "test_room",
 		SenderId: "user_alice",
-		Content:  "測試消息 - " + time.Now().Format("15:04:05"),
+		Content:  "測試消息",
 		Type:     "text",
 	}
 
@@ -146,7 +250,7 @@ func TestSendAndGetMessages(t *testing.T) {
 
 	// 獲取消息
 	getReq := &chat.GetMessagesRequest{
-		RoomId: testRoomID,
+		RoomId: "test_room",
 		UserId: "user_alice",
 		Limit:  10,
 	}
@@ -163,50 +267,28 @@ func TestSendAndGetMessages(t *testing.T) {
 	t.Logf("獲取消息成功，數量: %d", len(getResp.Messages))
 }
 
-// TestStreamMessages 測試流式消息（需要手動測試）
+// TestStreamMessages 測試流式消息
 func TestStreamMessages(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳過長時間運行的流式測試")
-	}
-
-	conn, err := grpc.NewClient("localhost:8081", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Skipf("跳過測試：無法連接到 gRPC 服務器: %v", err)
-		return
-	}
-	defer conn.Close()
-
+	conn := setupMockServer(t)
 	client := chat.NewChatRoomServiceClient(conn)
 
 	req := &chat.StreamMessagesRequest{
-		RoomId: testRoomID,
+		RoomId: "test_room",
 		UserId: "user_alice",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	stream, err := client.StreamMessages(ctx, req)
+	stream, err := client.StreamMessages(context.Background(), req)
 	if err != nil {
 		t.Fatalf("開啟流式消息失敗: %v", err)
 	}
 
-	t.Log("流式消息連接成功，等待 5 秒...")
+	// 接收一條消息
+	msg, err := stream.Recv()
+	if err != nil && err != io.EOF {
+		t.Fatalf("接收消息失敗: %v", err)
+	}
 
-	// 嘗試接收一條消息或超時
-	done := make(chan bool)
-	go func() {
-		msg, err := stream.Recv()
-		if err == nil {
-			t.Logf("收到消息: %s (發送者: %s)", msg.Content, msg.SenderId)
-		}
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		t.Log("流式測試完成")
-	case <-ctx.Done():
-		t.Log("流式測試超時（正常）")
+	if msg != nil {
+		t.Logf("收到流式消息: %s (發送者: %s)", msg.Content, msg.SenderId)
 	}
 }
