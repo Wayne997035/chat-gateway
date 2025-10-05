@@ -81,15 +81,16 @@ func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		allowedOrigins := map[string]bool{
-			"http://localhost:3000":                        true,
-			"http://localhost:8080":                        true,
-			"http://127.0.0.1:5500":                        true,
-			"http://127.0.0.1:8080":                        true,
-			"http://localhost:5500":                        true,
-			"https://thunderous-eclair-edba87.netlify.app": true,
-			"https://yourdomain.com":                       true,
-		}
+	allowedOrigins := map[string]bool{
+		"http://localhost:3000":                        true,
+		"http://localhost:8080":                        true,
+		"http://127.0.0.1:5500":                        true,
+		"http://127.0.0.1:8080":                        true,
+		"http://localhost:5500":                        true,
+		"https://thunderous-eclair-edba87.netlify.app": true,
+		"https://chat-web-do6.pages.dev":               true,
+		"https://yourdomain.com":                       true,
+	}
 
 		if allowedOrigins[origin] {
 			c.Header("Access-Control-Allow-Origin", origin)
