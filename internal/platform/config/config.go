@@ -327,13 +327,13 @@ func overrideMongoConfigFromEnv(cfg *Config) {
 	// MongoDB URL（按優先順序檢查多種命名格式）
 	if mongoURL := os.Getenv("MONGODB_URI"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL)) //#nosec G706
 	} else if mongoURL := os.Getenv("MONGO_URL"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL)) //#nosec G706
 	} else if mongoURL := os.Getenv("mongoURL"); mongoURL != "" {
 		cfg.Database.Mongo.URL = mongoURL
-		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL))
+		log.Printf("[MongoDB] 使用環境變數設定: %s", maskMongoURL(mongoURL)) //#nosec G706
 	}
 
 	// MongoDB 資料庫名稱

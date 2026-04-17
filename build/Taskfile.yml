@@ -41,24 +41,24 @@ tasks:
       - "cd .. && go mod tidy"
       # Staticcheck - 進階靜態分析
       - 'echo "Checking if staticcheck is installed..."'
-      - 'if ! command -v staticcheck >/dev/null 2>&1; then echo "Installing staticcheck..."; go install honnef.co/go/tools/cmd/staticcheck@latest; fi'
+      - 'if ! command -v staticcheck >/dev/null 2>&1 && ! test -f $(go env GOPATH)/bin/staticcheck; then echo "Installing staticcheck..."; go install honnef.co/go/tools/cmd/staticcheck@2025.1; fi'
       - 'echo "Running staticcheck..."'
-      - "cd .. && staticcheck ./..."
+      - "cd .. && $(go env GOPATH)/bin/staticcheck ./..."
       # Gosec - 安全性分析
       - 'echo "Checking if gosec is installed..."'
-      - 'if ! command -v gosec >/dev/null 2>&1; then echo "Installing gosec..."; go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; fi'
+      - 'if ! command -v gosec >/dev/null 2>&1 && ! test -f $(go env GOPATH)/bin/gosec; then echo "Installing gosec..."; go install github.com/securego/gosec/v2/cmd/gosec@latest; fi'
       - 'echo "Running gosec..."'
-      - "cd .. && gosec ./..."
+      - "cd .. && $(go env GOPATH)/bin/gosec ./..."
       # Golangci-lint - 綜合程式碼品質檢查
       - 'echo "Checking if golangci-lint is installed..."'
-      - 'if ! command -v golangci-lint >/dev/null 2>&1; then echo "Installing golangci-lint..."; go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; fi'
+      - 'if ! command -v golangci-lint >/dev/null 2>&1 && ! test -f $(go env GOPATH)/bin/golangci-lint; then echo "Installing golangci-lint..."; go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; fi'
       - 'echo "Running golangci-lint..."'
-      - "cd .. && golangci-lint run --verbose"
+      - "cd .. && $(go env GOPATH)/bin/golangci-lint run --verbose"
       # Goconst - 檢測重複字串
       - 'echo "Checking if goconst is installed..."'
-      - 'if ! command -v goconst >/dev/null 2>&1; then echo "Installing goconst..."; go install github.com/jgautheron/goconst/cmd/goconst@latest; fi'
+      - 'if ! command -v goconst >/dev/null 2>&1 && ! test -f $(go env GOPATH)/bin/goconst; then echo "Installing goconst..."; go install github.com/jgautheron/goconst/cmd/goconst@latest; fi'
       - 'echo "Running goconst..."'
-      - "cd .. && goconst -min-occurrences 3 -min-length 1 -ignore-tests=false ./internal/"
+      - "cd .. && $(go env GOPATH)/bin/goconst -min-occurrences 3 -min-length 1 -ignore-tests=false ./internal/"
       - 'echo "All code quality checks completed successfully!"'
       - 'echo ""'
       - 'echo "=== Running All Tests ==="'

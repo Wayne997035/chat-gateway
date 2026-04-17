@@ -94,6 +94,7 @@ func InitLogger() error {
 	if logDir == "" {
 		logDir = "./logs"
 	}
+	logDir = filepath.Clean(logDir)
 
 	projectID = os.Getenv("GCP_PROJECT_ID")
 	if projectID == "" {
