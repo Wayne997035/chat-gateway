@@ -103,6 +103,7 @@ type EncryptionConfig struct {
 	Enabled   bool   `mapstructure:"enabled"`
 	Algorithm string `mapstructure:"algorithm"`
 	KeyLength int    `mapstructure:"key_length"`
+	MasterKey string `mapstructure:"master_key"` // base64(32 bytes), dev only — 生產環境用 MASTER_KEY env var
 }
 
 // AuditConfig 審計配置.

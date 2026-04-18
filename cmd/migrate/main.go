@@ -74,15 +74,18 @@ func decryptCTR(encryptedText string, key []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-// loadMasterKey 從環境變量 MASTER_KEY 讀取 base64 編碼的 32 bytes 密鑰.
-// Migration 工具必須提供明確的 MASTER_KEY，不允許使用隨機密鑰.
+// loadMasterKey 讀取 base64 編碼的 32 bytes 密鑰.
+// 優先順序：MASTER_KEY env var → config security.encryption.master_key
 func loadMasterKey() ([]byte, error) {
-	masterKeyEnv := os.Getenv("MASTER_KEY")
-	if masterKeyEnv == "" {
-		return nil, fmt.Errorf("MASTER_KEY environment variable is required for migration")
+	raw := os.Getenv("MASTER_KEY")
+	if raw == "" {
+		raw = config.Get().Security.Encryption.MasterKey
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("MASTER_KEY not set (env var or security.encryption.master_key in config)")
 	}
 
-	masterKey, err := base64.StdEncoding.DecodeString(masterKeyEnv)
+	masterKey, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
 		return nil, fmt.Errorf("MASTER_KEY base64 decode failed: %w", err)
 	}
@@ -235,13 +238,7 @@ func runMigration(
 
 	result := &migrateResult{total: int(total)}
 
-	// Clamp batchSize to int32 range; flag parsing ensures positive value, max int32 is 2^31-1.
-	if batchSize > int(^int32(0)) {
-		batchSize = int(^int32(0))
-	}
-
 	opts := options.Find().
-		SetBatchSize(int32(batchSize)). // #nosec G115 -- range guarded above
 		SetProjection(bson.M{
 			"_id":     1,
 			"content": 1,
