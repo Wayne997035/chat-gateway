@@ -16,7 +16,7 @@ Client → HTTP (Gin) → gRPC service → MongoDB
 
 ## Key Design Decisions
 
-- **Encryption**: `MASTER_KEY` env var → encrypts per-room AES-256-CTR keys in MongoDB. Missing = random key (dev only)
+- **Encryption**: `MASTER_KEY` env var → encrypts per-room AES-256-GCM keys in MongoDB. Missing = random key (dev only)
 - **Key manager**: Double-Check Locking with `sync.RWMutex`
 - **Pagination**: cursor-based (not offset)
 - **Rate limiting**: 3-tier (global / endpoint / IP), relaxed in `configs/local.yaml`
