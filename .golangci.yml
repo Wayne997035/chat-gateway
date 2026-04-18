@@ -92,43 +92,39 @@ linters-settings:
     extra-rules: true # 啟用額外的格式化規則.
     module-path: "" # 模組路徑設定.
 
-  # Security check exclusions (false positives) - 安全性檢查排除項目 (誤報處理).
+  # Security check exclusions - 安全性檢查排除項目.
+  # Only exclude confirmed false positives that cannot be fixed at the call site.
+  # G101/G107/G110/G111/G204/G304 are NOT excluded globally — they must be handled per call site with #nosec + reason.
   gosec:
     excludes:
-      - G101 # Look for hardcoded credentials
-      - G102 # Bind to all interfaces
-      - G103 # Audit the use of unsafe block
-      - G104 # Audit errors not checked
-      - G106 # Audit the use of ssh.InsecureIgnoreHostKey
-      - G107 # Url provided to HTTP request as taint input
-      - G108 # Use of net/http serve function that has no support for setting timeouts
-      - G109 # Integer overflow in strconv.Atoi result (to int)
-      - G110 # Potential DoS vulnerability via decompression bomb
-      - G111 # Potential directory traversal
-      - G112 # Potential slowloris attack
-      - G113 # Use of deprecated http.CanonicalHeaderKey
-      - G114 # Use of net/http serve function that has no support for setting timeouts
-      - G201 # SQL query construction using format string
-      - G202 # SQL query construction using string concatenation
-      - G203 # Use of unescaped data in HTML templates
-      - G204 # Audit use of command execution
-      - G301 # Poor file permissions used when creating a directory
-      - G302 # Poor file permissions used when creating a file
-      - G303 # Creating temp file using a predictable path
-      - G304 # Potential file inclusion via variable
-      - G305 # File traversal when extracting zip archive
-      - G306 # Poor file permissions used when writing to a file
-      - G307 # Poor file permissions used when creating a file
-      - G401 # Detect the usage of DES, RC4, MD5 or SHA1
-      - G402 # Look for bad TLS connection settings
-      - G403 # Ensure minimum RSA key length of 2048 bits
-      - G404 # Insecure random number source (rand)
-      - G501 # Import blacklist: crypto/md5
-      - G502 # Import blacklist: crypto/des
-      - G503 # Import blacklist: crypto/rc4
-      - G504 # Import blacklist: net/http/cgi
-      - G505 # Import blacklist: crypto/sha1
-      - G601 # Implicit memory aliasing in for loop
+      - G102 # Bind to all interfaces — intentional for server listeners
+      - G103 # Audit the use of unsafe block — reviewed per usage
+      - G104 # Audit errors not checked — handled by errcheck linter separately
+      - G106 # Audit the use of ssh.InsecureIgnoreHostKey — no SSH in this project
+      - G108 # Use of net/http serve function that has no support for setting timeouts — Gin handles timeouts
+      - G109 # Integer overflow in strconv.Atoi result (to int) — reviewed per usage
+      - G112 # Potential slowloris attack — Gin sets read/write timeouts
+      - G113 # Use of deprecated http.CanonicalHeaderKey — not used
+      - G114 # Use of net/http serve function that has no support for setting timeouts — Gin handles timeouts
+      - G201 # SQL query construction using format string — no SQL in this project (MongoDB only)
+      - G202 # SQL query construction using string concatenation — no SQL in this project
+      - G203 # Use of unescaped data in HTML templates — no HTML templates
+      - G301 # Poor file permissions used when creating a directory — reviewed per usage
+      - G302 # Poor file permissions used when creating a file — reviewed per usage
+      - G303 # Creating temp file using a predictable path — no temp files
+      - G305 # File traversal when extracting zip archive — no zip extraction
+      - G306 # Poor file permissions used when writing to a file — reviewed per usage
+      - G307 # Poor file permissions used when creating a file — reviewed per usage
+      - G401 # Detect the usage of DES, RC4, MD5 or SHA1 — no weak crypto used
+      - G402 # Look for bad TLS connection settings — reviewed per usage
+      - G403 # Ensure minimum RSA key length of 2048 bits — no RSA in this project
+      - G404 # Insecure random number source (rand) — reviewed per usage
+      - G501 # Import blacklist: crypto/md5 — not imported
+      - G502 # Import blacklist: crypto/des — not imported
+      - G503 # Import blacklist: crypto/rc4 — not imported
+      - G504 # Import blacklist: net/http/cgi — not imported
+      - G505 # Import blacklist: crypto/sha1 — not imported
+      - G601 # Implicit memory aliasing in for loop — fixed in Go 1.22+
 
 issues:
   exclude-rules:
