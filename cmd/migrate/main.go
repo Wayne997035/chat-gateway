@@ -145,12 +145,7 @@ func migrateBatch(
 		default:
 			slog.Warn("[Migration] unrecognized content format, skipping",
 				"id", msg.ID.Hex(),
-				"prefix", func() string {
-					if len(content) > 15 {
-						return content[:15]
-					}
-					return content
-				}(),
+				"content_len", len(content),
 			)
 			result.skipped++
 			continue
@@ -315,16 +310,23 @@ func run() error {
 	envFlag := flag.String("env", "local", "config environment (corresponds to configs/{env}.yaml)")
 	dryRun := flag.Bool("dry-run", false, "dry-run mode: print plan without writing to DB")
 	batchSize := flag.Int("batch-size", 100, "number of messages to process per batch")
+	timeoutMinutes := flag.Int("timeout", 30, "migration timeout in minutes (0 = no timeout)")
+	confirm := flag.Bool("confirm", false, "confirm execution; required when not using --dry-run")
 	flag.Parse()
+
+	if *batchSize <= 0 {
+		return fmt.Errorf("--batch-size must be greater than 0, got %d", *batchSize)
+	}
 
 	slog.Info("[Migration] Starting...",
 		"env", *envFlag,
 		"dry_run", *dryRun,
 		"batch_size", *batchSize,
+		"timeout_minutes", *timeoutMinutes,
 	)
 
 	// 設定 APP_ENV 使 config.Load() 讀取正確的配置文件.
-	if err := os.Setenv("APP_ENV", *envFlag); err != nil { // #nosec G104 -- Setenv only fails on empty key; flagged value is always non-empty
+	if err := os.Setenv("APP_ENV", *envFlag); err != nil {
 		return fmt.Errorf("set APP_ENV failed: %w", err)
 	}
 	config.SetEnv(*envFlag)
@@ -339,6 +341,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for i := range masterKey {
+			masterKey[i] = 0
+		}
+	}()
 
 	// 連接 MongoDB.
 	if err := driver.ConnectMongo(); err != nil {
@@ -350,13 +357,38 @@ func run() error {
 		return fmt.Errorf("MongoDB database is nil after connection")
 	}
 
+	// 建立有 timeout 的 context.
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if *timeoutMinutes > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*timeoutMinutes)*time.Minute)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	defer cancel()
+
 	// 初始化 KeyManager.
 	km, err := keymanager.NewKeyManagerWithPersistence(masterKey, db)
 	if err != nil {
 		return fmt.Errorf("key manager init failed: %w", err)
 	}
 
-	ctx := context.Background()
+	// 若非 dry-run，需要 --confirm=true 才執行.
+	if !*dryRun && !*confirm {
+		collection := db.Collection("messages")
+		filter := bson.M{
+			"$or": bson.A{
+				bson.M{"content": bson.M{"$regex": "^aes256ctr:"}},
+				bson.M{"content": bson.M{"$regex": "^plaintext:"}},
+			},
+		}
+		total, countErr := collection.CountDocuments(ctx, filter)
+		if countErr != nil {
+			return fmt.Errorf("count documents failed: %w", countErr)
+		}
+		slog.Info(fmt.Sprintf("Found %d messages to migrate. Re-run with --confirm=true to execute.", total))
+		return nil
+	}
 
 	return runMigration(ctx, db, km, *batchSize, *dryRun)
 }

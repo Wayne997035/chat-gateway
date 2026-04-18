@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -310,6 +311,7 @@ func listUserRooms(c *gin.Context) {
 		return
 	}
 	messageClient := chat.NewChatRoomServiceClient(conn)
+	reqCtx := c.Request.Context()
 
 	// 轉換響應，包含最後訊息和未讀數量（並發獲取各房間未讀數量）
 	rooms := make([]map[string]interface{}, len(resp.Rooms))
@@ -318,10 +320,13 @@ func listUserRooms(c *gin.Context) {
 		wg.Add(1)
 		go func(idx int, r *chat.ChatRoom) {
 			defer wg.Done()
-			unreadResp, _ := messageClient.GetUnreadCount(context.Background(), &chat.GetUnreadCountRequest{
+			unreadResp, unreadErr := messageClient.GetUnreadCount(reqCtx, &chat.GetUnreadCountRequest{
 				UserId: userID,
 				RoomId: r.Id,
 			})
+			if unreadErr != nil {
+				slog.Warn("failed to get unread count", "room_id", r.Id, "error", unreadErr)
+			}
 			unreadCount := int32(0)
 			if unreadResp != nil && unreadResp.Success {
 				unreadCount = unreadResp.Count

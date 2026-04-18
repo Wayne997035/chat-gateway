@@ -2,7 +2,8 @@ package encryption
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
+	"sync"
 
 	"chat-gateway/internal/security/keymanager"
 )
@@ -13,12 +14,13 @@ const plaintextPrefix = "plaintext:"
 type MessageEncryption struct {
 	enabled    bool
 	keyManager *keymanager.KeyManagerWithPersistence
+	warnOnce   sync.Once
 }
 
 // NewMessageEncryption 創建消息加密服務
 func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence) *MessageEncryption {
 	if km == nil {
-		log.Println("[WARNING] KeyManager is nil. Encryption will be disabled.")
+		slog.Warn("[WARNING] KeyManager is nil. Encryption will be disabled.")
 		enabled = false
 	}
 
@@ -31,7 +33,9 @@ func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence
 // EncryptMessage 使用 AES-256-GCM 加密消息
 func (m *MessageEncryption) EncryptMessage(content, roomID string) (string, error) {
 	if !m.enabled {
-		log.Println("[WARNING] Message encryption is DISABLED. Messages are stored in PLAIN TEXT!")
+		m.warnOnce.Do(func() {
+			slog.Warn("[WARNING] Message encryption is DISABLED. Messages are stored in PLAIN TEXT!")
+		})
 		return plaintextPrefix + content, nil
 	}
 

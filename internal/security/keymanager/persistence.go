@@ -185,6 +185,22 @@ func (ks *KeyStore) DeleteExpiredKeys(ctx context.Context) (int64, error) {
 	return result.DeletedCount, nil
 }
 
+// UpdateEncryptedKey 更新指定聊天室活躍密鑰的加密格式（用於 CTR → GCM 升級）
+func (ks *KeyStore) UpdateEncryptedKey(ctx context.Context, roomID, newEncryptedKey string) error {
+	filter := bson.M{
+		"room_id":   roomID,
+		"is_active": true,
+	}
+	update := bson.M{
+		"$set": bson.M{"encrypted_key": newEncryptedKey},
+	}
+	_, err := ks.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update encrypted key: %w", err)
+	}
+	return nil
+}
+
 // GetKeysToRotate 獲取需要輪替的密鑰
 func (ks *KeyStore) GetKeysToRotate(ctx context.Context, rotationInterval time.Duration) ([]*KeyDocument, error) {
 	filter := bson.M{
