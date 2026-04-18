@@ -612,10 +612,10 @@ func (s *Server) MarkAsRead(ctx context.Context, req *chat.MarkAsReadRequest) (*
 
 // GetUnreadCount 獲取未讀數量
 func (s *Server) GetUnreadCount(ctx context.Context, req *chat.GetUnreadCountRequest) (*chat.GetUnreadCountResponse, error) {
-	// 獲取該聊天室的所有訊息
-	messages, _, _, err := s.repos.Message.GetByRoomID(ctx, req.RoomId, 1000, "", nil, nil)
+	roomID := req.RoomId
+	count, err := s.repos.Message.GetUnreadCount(ctx, req.UserId, &roomID)
 	if err != nil {
-		logger.Error(ctx, "獲取訊息失敗",
+		logger.Error(ctx, "獲取未讀數量失敗",
 			logger.WithUserID(req.UserId),
 			logger.WithRoomID(req.RoomId),
 			logger.WithDetails(map[string]interface{}{"error": err.Error()}))
@@ -626,30 +626,15 @@ func (s *Server) GetUnreadCount(ctx context.Context, req *chat.GetUnreadCountReq
 		}, nil
 	}
 
-	// 計算未讀數量（訊息的 read_by 中不包含該用戶）
-	unreadCount := int32(0)
-	for _, message := range messages {
-		isRead := false
-		for _, readBy := range message.ReadBy {
-			if readBy.UserID == req.UserId {
-				isRead = true
-				break
-			}
-		}
-		if !isRead && message.SenderID != req.UserId {
-			unreadCount++
-		}
-	}
-
 	logger.Info(ctx, "獲取未讀數量成功",
 		logger.WithUserID(req.UserId),
 		logger.WithRoomID(req.RoomId),
-		logger.WithDetails(map[string]interface{}{"count": unreadCount}))
+		logger.WithDetails(map[string]interface{}{"count": count}))
 
 	return &chat.GetUnreadCountResponse{
 		Success: true,
 		Message: "獲取未讀數量成功",
-		Count:   unreadCount,
+		Count:   int32(count), // #nosec G115 -- bounded by CountDocuments query limit
 	}, nil
 }
 

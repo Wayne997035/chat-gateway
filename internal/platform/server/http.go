@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"chat-gateway/internal/grpcclient"
@@ -310,33 +311,36 @@ func listUserRooms(c *gin.Context) {
 	}
 	messageClient := chat.NewChatRoomServiceClient(conn)
 
-	// 轉換響應，包含最後訊息和未讀數量
+	// 轉換響應，包含最後訊息和未讀數量（並發獲取各房間未讀數量）
 	rooms := make([]map[string]interface{}, len(resp.Rooms))
+	var wg sync.WaitGroup
 	for i, room := range resp.Rooms {
-		// 獲取未讀數量
-		unreadResp, _ := messageClient.GetUnreadCount(context.Background(), &chat.GetUnreadCountRequest{
-			UserId: userID,
-			RoomId: room.Id,
-		})
-
-		unreadCount := int32(0)
-		if unreadResp != nil && unreadResp.Success {
-			unreadCount = unreadResp.Count
-		}
-
-		rooms[i] = map[string]interface{}{
-			"id":                room.Id,
-			"name":              room.Name,
-			"type":              room.Type,
-			"owner_id":          room.OwnerId,
-			"created_at":        room.CreatedAt,
-			"updated_at":        room.UpdatedAt,
-			"members":           room.Members,
-			"last_message":      room.LastMessage,
-			"last_message_time": room.LastMessageTime,
-			"unread_count":      unreadCount,
-		}
+		wg.Add(1)
+		go func(idx int, r *chat.ChatRoom) {
+			defer wg.Done()
+			unreadResp, _ := messageClient.GetUnreadCount(context.Background(), &chat.GetUnreadCountRequest{
+				UserId: userID,
+				RoomId: r.Id,
+			})
+			unreadCount := int32(0)
+			if unreadResp != nil && unreadResp.Success {
+				unreadCount = unreadResp.Count
+			}
+			rooms[idx] = map[string]interface{}{
+				"id":                r.Id,
+				"name":              r.Name,
+				"type":              r.Type,
+				"owner_id":          r.OwnerId,
+				"created_at":        r.CreatedAt,
+				"updated_at":        r.UpdatedAt,
+				"members":           r.Members,
+				"last_message":      r.LastMessage,
+				"last_message_time": r.LastMessageTime,
+				"unread_count":      unreadCount,
+			}
+		}(i, room)
 	}
+	wg.Wait()
 
 	c.JSON(200, gin.H{
 		"success":  resp.Success,
