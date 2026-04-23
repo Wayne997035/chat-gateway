@@ -3,6 +3,8 @@ package encryption
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 
 	"chat-gateway/internal/security/keymanager"
@@ -30,7 +32,7 @@ func NewMessageEncryption(enabled bool, km *keymanager.KeyManagerWithPersistence
 	}
 }
 
-// EncryptMessage 使用 AES-256-GCM 加密消息
+// EncryptMessage 使用 AES-256-GCM 加密消息，並在密文前加上 v{version}: 前綴
 func (m *MessageEncryption) EncryptMessage(content, roomID string) (string, error) {
 	if !m.enabled {
 		m.warnOnce.Do(func() {
@@ -43,7 +45,8 @@ func (m *MessageEncryption) EncryptMessage(content, roomID string) (string, erro
 		return "", fmt.Errorf("key manager not initialized")
 	}
 
-	key, err := m.keyManager.GetOrCreateRoomKey(roomID)
+	// GetActiveKeyWithVersion 原子性取得 key bytes 與版本號，避免兩次呼叫之間發生 rotation
+	key, version, err := m.keyManager.GetActiveKeyWithVersion(roomID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get room key: %w", err)
 	}
@@ -58,10 +61,11 @@ func (m *MessageEncryption) EncryptMessage(content, roomID string) (string, erro
 		return "", fmt.Errorf("encryption failed: %w", err)
 	}
 
-	return encrypted, nil
+	return fmt.Sprintf("v%d:%s", version, encrypted), nil
 }
 
-// DecryptMessage 解密消息，GCM auth tag 驗證竄改
+// DecryptMessage 解密消息，支援 v{version}: 前綴路由至對應版本密鑰.
+// 不帶版本前綴的密文視為 v1（向下相容）.
 func (m *MessageEncryption) DecryptMessage(encryptedContent, roomID string) (string, error) {
 	if !m.enabled {
 		if len(encryptedContent) > len(plaintextPrefix) && encryptedContent[:len(plaintextPrefix)] == plaintextPrefix {
@@ -79,9 +83,28 @@ func (m *MessageEncryption) DecryptMessage(encryptedContent, roomID string) (str
 		return encryptedContent[len(plaintextPrefix):], nil
 	}
 
-	key, err := m.keyManager.GetOrCreateRoomKey(roomID)
+	// 解析版本前綴 v{N}:，不帶前綴時視為 v1
+	version := 1
+	ciphertext := encryptedContent
+	if len(encryptedContent) > 2 && encryptedContent[0] == 'v' {
+		colonIdx := strings.Index(encryptedContent[1:], ":")
+		if colonIdx >= 0 {
+			if n, parseErr := strconv.Atoi(encryptedContent[1 : 1+colonIdx]); parseErr == nil {
+				version = n
+				ciphertext = encryptedContent[1+colonIdx+1:]
+			}
+		}
+	}
+
+	// 版本號無效（0 或負數）視為 legacy v1，整個字串作為密文
+	if version <= 0 {
+		version = 1
+		ciphertext = encryptedContent
+	}
+
+	key, err := m.keyManager.GetKeyByVersion(roomID, version)
 	if err != nil {
-		return "", fmt.Errorf("failed to get room key: %w", err)
+		return "", fmt.Errorf("failed to get key for version %d: %w", version, err)
 	}
 
 	aesGCM, err := NewAESGCMEncryption(key)
@@ -89,7 +112,7 @@ func (m *MessageEncryption) DecryptMessage(encryptedContent, roomID string) (str
 		return "", fmt.Errorf("failed to create decryptor: %w", err)
 	}
 
-	decrypted, err := aesGCM.Decrypt(encryptedContent)
+	decrypted, err := aesGCM.Decrypt(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed: %w", err)
 	}
@@ -97,8 +120,19 @@ func (m *MessageEncryption) DecryptMessage(encryptedContent, roomID string) (str
 	return decrypted, nil
 }
 
-// IsEncrypted 檢查消息是否為 AES-256-GCM 加密格式
+// IsEncrypted 檢查消息是否為 AES-256-GCM 加密格式（含或不含版本前綴）
 func (m *MessageEncryption) IsEncrypted(content string) bool {
+	// 帶版本前綴: v{N}:aes256gcm:...
+	if len(content) > 2 && content[0] == 'v' {
+		colonIdx := strings.Index(content[1:], ":")
+		if colonIdx >= 0 {
+			rest := content[1+colonIdx+1:]
+			if len(rest) >= len(aes256GCMPrefix) && rest[:len(aes256GCMPrefix)] == aes256GCMPrefix {
+				return true
+			}
+		}
+	}
+	// 不帶版本前綴的舊格式
 	if len(content) < len(aes256GCMPrefix) {
 		return false
 	}
