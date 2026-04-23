@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"chat-gateway/internal/platform/config"
@@ -79,7 +80,9 @@ func decryptCTR(encryptedText string, key []byte) (string, error) {
 func loadMasterKey() ([]byte, error) {
 	raw := os.Getenv("MASTER_KEY")
 	if raw == "" {
-		raw = config.Get().Security.Encryption.MasterKey
+		if cfg := config.Get(); cfg != nil {
+			raw = cfg.Security.Encryption.MasterKey
+		}
 	}
 	if raw == "" {
 		return nil, fmt.Errorf("MASTER_KEY not set (env var or security.encryption.master_key in config)")
@@ -97,6 +100,15 @@ func loadMasterKey() ([]byte, error) {
 	return masterKey, nil
 }
 
+// isAlreadyMigrated 判斷訊息內容是否已為 GCM 格式（包含新的 v{N}:aes256gcm: 前綴）.
+func isAlreadyMigrated(content string) bool {
+	if strings.HasPrefix(content, gcmPrefix) {
+		return true
+	}
+	// 新格式：v{N}:aes256gcm:...
+	return len(content) > 2 && content[0] == 'v' && strings.Contains(content, ":"+gcmPrefix)
+}
+
 // migrateBatch 處理單一批次的遷移.
 func migrateBatch(
 	ctx context.Context,
@@ -109,8 +121,8 @@ func migrateBatch(
 	for _, msg := range messages {
 		content := msg.Content
 
-		// 已經是 GCM 格式，跳過.
-		if len(content) >= len(gcmPrefix) && content[:len(gcmPrefix)] == gcmPrefix {
+		// 已經是 GCM 格式（含版本前綴），跳過.
+		if isAlreadyMigrated(content) {
 			result.skipped++
 			continue
 		}
