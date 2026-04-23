@@ -81,6 +81,7 @@ type SecurityConfig struct {
 	Authentication AuthenticationConfig `mapstructure:"authentication"`
 	Encryption     EncryptionConfig     `mapstructure:"encryption"`
 	Audit          AuditConfig          `mapstructure:"audit"`
+	AdminToken     string               `mapstructure:"admin_token"`
 }
 
 // TLSConfig TLS 配置.
@@ -227,6 +228,9 @@ func Load(testCfg ...*Config) error {
 	// 從環境變數覆蓋 MongoDB 設定
 	overrideMongoConfigFromEnv(config)
 
+	// 從環境變數覆蓋安全設定
+	overrideSecurityConfigFromEnv(config)
+
 	// 驗證配置
 	if err := validateConfig(config); err != nil {
 		return fmt.Errorf("配置驗證失敗: %w", err)
@@ -294,6 +298,11 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.Log.MaxSizeMB <= 0 {
 		return fmt.Errorf("日誌檔案最大大小必須大於 0")
+	}
+
+	// 驗證 admin token（encryption 啟用時必填）
+	if err := ValidateAdminToken(cfg); err != nil {
+		return err
 	}
 
 	return nil
@@ -368,6 +377,28 @@ func overrideMongoConfigFromEnv(cfg *Config) {
 	if tlsKeyFile := os.Getenv("MONGO_TLS_KEY_FILE"); tlsKeyFile != "" {
 		cfg.Database.Mongo.TLSKeyFile = tlsKeyFile
 	}
+}
+
+// overrideSecurityConfigFromEnv 從環境變數覆蓋安全設定
+func overrideSecurityConfigFromEnv(cfg *Config) {
+	if token := os.Getenv("ADMIN_TOKEN"); token != "" {
+		cfg.Security.AdminToken = token
+	}
+}
+
+// ValidateAdminToken 在啟動時驗證 admin token 配置
+// 只在 encryption 啟用時強制檢查（rotate-key endpoint 需要它）
+func ValidateAdminToken(cfg *Config) error {
+	if !cfg.Security.Encryption.Enabled {
+		return nil
+	}
+	if cfg.Security.AdminToken == "" {
+		return fmt.Errorf("ADMIN_TOKEN 未設定：加密啟用時 admin token 為必填（設定 ADMIN_TOKEN 環境變數）")
+	}
+	if len(cfg.Security.AdminToken) < 32 {
+		return fmt.Errorf("ADMIN_TOKEN 長度不足：至少需要 32 個字元，目前 %d 個字元", len(cfg.Security.AdminToken))
+	}
+	return nil
 }
 
 // maskMongoURL 遮蔽 MongoDB URL 中的敏感資訊

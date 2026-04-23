@@ -27,3 +27,6 @@ log:
   rotation_time_hours: 24
   max_age_days: 7
   max_size_mb: 100
+
+security:
+  admin_token: ""

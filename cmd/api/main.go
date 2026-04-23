@@ -155,9 +155,15 @@ func mainNoExit() error {
 		}
 	}()
 
+	// 建立密鑰輪換 HTTP handler（encryption 未啟用時為 nil，router 會略過）
+	var keyRotationHandler *keymanager.KeyRotationHandler
+	if encryptionEnabled && keyManager != nil {
+		keyRotationHandler = keymanager.NewKeyRotationHandler(keyManager, cfg.Security.AdminToken)
+	}
+
 	// 啟動 HTTP 服務器（API 橋樑）
 	go func() {
-		if err := server.Start(repos); err != nil {
+		if err := server.Start(repos, keyRotationHandler); err != nil {
 			logger.Errorf(ctx, "HTTP 服務器啟動失敗: %v", err)
 		}
 	}()

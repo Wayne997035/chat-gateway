@@ -11,11 +11,12 @@ import (
 	"chat-gateway/internal/platform/config"
 	"chat-gateway/internal/platform/driver"
 	"chat-gateway/internal/platform/logger"
+	"chat-gateway/internal/security/keymanager"
 	"chat-gateway/internal/storage/database"
 )
 
 // Start 啟動伺服器.
-func Start(repos *database.Repositories) error {
+func Start(repos *database.Repositories, keyRotationHandler *keymanager.KeyRotationHandler) error {
 	// 初始化日誌系統
 	if err := logger.InitLogger(); err != nil {
 		return err
@@ -47,7 +48,7 @@ func Start(repos *database.Repositories) error {
 	logger.LogInfof("儲存庫集合初始化完成")
 
 	// setting router
-	router := Router()
+	router := Router(keyRotationHandler)
 
 	// create HTTP server
 	server := &http.Server{

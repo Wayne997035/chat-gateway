@@ -12,6 +12,7 @@ import (
 	"chat-gateway/internal/platform/config"
 	"chat-gateway/internal/platform/health"
 	"chat-gateway/internal/platform/middleware"
+	"chat-gateway/internal/security/keymanager"
 	"chat-gateway/proto/chat"
 
 	"github.com/gin-gonic/gin"
@@ -47,9 +48,10 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// Router 設定路由 - 簡化版本，只保留健康檢查
-func Router() *gin.Engine {
-	r := gin.Default()
+// Router 設定路由.
+func Router(keyRotationHandler *keymanager.KeyRotationHandler) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
 
 	setupMiddleware(r)
 
@@ -58,7 +60,7 @@ func Router() *gin.Engine {
 
 	sseLimiter := setupSSELimiter()
 
-	registerRoutes(r, sseLimiter)
+	registerRoutes(r, sseLimiter, keyRotationHandler)
 
 	return r
 }
@@ -163,8 +165,8 @@ func setupSSELimiter() *middleware.SSEConnectionLimiter {
 	)
 }
 
-// registerRoutes 註冊所有路由
-func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter) {
+// registerRoutes 註冊所有路由.
+func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter, keyRotationHandler *keymanager.KeyRotationHandler) {
 	healthHandler := health.NewHealthHandler()
 	r.GET("/health", healthHandler.HealthCheck)
 
@@ -177,6 +179,15 @@ func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter) 
 	r.POST("/api/v1/messages/read", markAsRead)
 
 	r.GET("/api/v1/messages/stream", sseLimiter.Middleware(), streamMessages)
+
+	// Admin routes — authenticated via Bearer token in handler
+	// Tight rate limit (5/min) since this is a sensitive credential-gated endpoint
+	if keyRotationHandler != nil {
+		adminLimiter := middleware.NewRateLimiter(5, time.Minute)
+		adminGroup := r.Group("/admin")
+		adminGroup.Use(adminLimiter.Middleware())
+		adminGroup.POST("/rooms/:roomID/rotate-key", keyRotationHandler.ForceRotate)
+	}
 }
 
 // 創建聊天室
