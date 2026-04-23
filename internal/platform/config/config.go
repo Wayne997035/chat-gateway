@@ -398,14 +398,17 @@ func overrideSecurityConfigFromEnv(cfg *Config) {
 	}
 }
 
-// ValidateAdminToken 在啟動時驗證 admin token 配置
-// 只在 encryption 啟用時強制檢查（rotate-key endpoint 需要它）
+// ValidateAdminToken 在啟動時驗證 admin token 配置.
+// 空值 = rotate-key endpoint 不啟用（僅警告，允許啟動）.
+// 非空但長度 < 32 = fatal（防止弱 token 進生產）.
 func ValidateAdminToken(cfg *Config) error {
 	if !cfg.Security.Encryption.Enabled {
 		return nil
 	}
 	if cfg.Security.AdminToken == "" {
-		return fmt.Errorf("ADMIN_TOKEN 未設定：加密啟用時 admin token 為必填（設定 ADMIN_TOKEN 環境變數）")
+		// rotate-key endpoint will not be registered; startup proceeds
+		log.Println("[WARNING] ADMIN_TOKEN 未設定：/admin/rotate-key endpoint 將不可用（設定 ADMIN_TOKEN 環境變數以啟用）")
+		return nil
 	}
 	if len(cfg.Security.AdminToken) < 32 {
 		return fmt.Errorf("ADMIN_TOKEN 長度不足：至少需要 32 個字元，目前 %d 個字元", len(cfg.Security.AdminToken))

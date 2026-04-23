@@ -155,11 +155,8 @@ func mainNoExit() error {
 		}
 	}()
 
-	// 建立密鑰輪換 HTTP handler（encryption 未啟用時為 nil，router 會略過）
-	var keyRotationHandler *keymanager.KeyRotationHandler
-	if encryptionEnabled && keyManager != nil {
-		keyRotationHandler = keymanager.NewKeyRotationHandler(keyManager, cfg.Security.AdminToken)
-	}
+	// 建立密鑰輪換 HTTP handler（encryption 未啟用或 ADMIN_TOKEN 未設定時為 nil，router 會略過）
+	keyRotationHandler := buildKeyRotationHandler(keyManager, cfg.Security.AdminToken, encryptionEnabled)
 
 	// 啟動 HTTP 服務器（API 橋樑）
 	go func() {
@@ -181,4 +178,14 @@ func mainNoExit() error {
 	grpcServer.Stop()
 
 	return nil
+}
+
+// buildKeyRotationHandler 建立密鑰輪換 handler；條件未滿足時回傳 nil（router 略過）.
+func buildKeyRotationHandler(
+	km *keymanager.KeyManagerWithPersistence, adminToken string, encryptionEnabled bool,
+) *keymanager.KeyRotationHandler {
+	if !encryptionEnabled || km == nil || adminToken == "" {
+		return nil
+	}
+	return keymanager.NewKeyRotationHandler(km, adminToken)
 }
