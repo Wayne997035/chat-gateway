@@ -30,3 +30,4 @@ log:
 
 security:
   admin_token: ""
+  key_set: ""  # set via CONFIG_KEYSET env var at runtime
