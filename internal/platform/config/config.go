@@ -5,10 +5,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
+
+	"chat-gateway/internal/crypto"
 )
 
 // Config 應用程式配置結構.
@@ -82,6 +85,7 @@ type SecurityConfig struct {
 	Encryption     EncryptionConfig     `mapstructure:"encryption"`
 	Audit          AuditConfig          `mapstructure:"audit"`
 	AdminToken     string               `mapstructure:"admin_token"`
+	KeySet         string               `mapstructure:"key_set"` // base64-encoded Tink JSON keyset for ENC() decryption
 }
 
 // TLSConfig TLS 配置.
@@ -230,6 +234,11 @@ func Load(testCfg ...*Config) error {
 
 	// 從環境變數覆蓋安全設定
 	overrideSecurityConfigFromEnv(config)
+
+	// 解密 ENC(...) 格式的配置欄位
+	if err := decryptConfig(config); err != nil {
+		return fmt.Errorf("配置解密失敗: %w", err)
+	}
 
 	// 驗證配置
 	if err := validateConfig(config); err != nil {
@@ -384,6 +393,9 @@ func overrideSecurityConfigFromEnv(cfg *Config) {
 	if token := os.Getenv("ADMIN_TOKEN"); token != "" {
 		cfg.Security.AdminToken = token
 	}
+	if ks := os.Getenv("CONFIG_KEYSET"); ks != "" {
+		cfg.Security.KeySet = ks
+	}
 }
 
 // ValidateAdminToken 在啟動時驗證 admin token 配置
@@ -398,6 +410,67 @@ func ValidateAdminToken(cfg *Config) error {
 	if len(cfg.Security.AdminToken) < 32 {
 		return fmt.Errorf("ADMIN_TOKEN 長度不足：至少需要 32 個字元，目前 %d 個字元", len(cfg.Security.AdminToken))
 	}
+	return nil
+}
+
+// decryptConfig 解密 Config 結構中所有 ENC(...) 格式的欄位.
+// 若 Security.KeySet 為空則跳過（no-op）.
+func decryptConfig(cfg *Config) error {
+	if cfg.Security.KeySet == "" {
+		return nil
+	}
+	return walkAndDecrypt(reflect.ValueOf(cfg).Elem(), cfg.Security.KeySet)
+}
+
+// walkAndDecrypt 遞迴走訪 Config 結構中的字串欄位，解密所有 ENC(...) 格式的值.
+// Security 結構本身（含 KeySet）會被跳過，不做解密嘗試.
+func walkAndDecrypt(v reflect.Value, keyset string) error {
+	switch v.Kind() { //nolint:exhaustive // only handle kinds present in Config tree
+	case reflect.Ptr:
+		if v.IsNil() {
+			return nil
+		}
+		return walkAndDecrypt(v.Elem(), keyset)
+	case reflect.Struct:
+		return walkStructFields(v, keyset)
+	case reflect.String:
+		return decryptStringField(v, keyset)
+	}
+	return nil
+}
+
+// walkStructFields 走訪結構體的所有欄位，跳過 Security 欄位本身.
+func walkStructFields(v reflect.Value, keyset string) error {
+	for i := 0; i < v.NumField(); i++ {
+		if v.Type().Field(i).Name == "Security" {
+			continue
+		}
+		if err := walkAndDecrypt(v.Field(i), keyset); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// decryptStringField 解密單一字串欄位中的 ENC(...) 值.
+func decryptStringField(v reflect.Value, keyset string) error {
+	if !v.CanSet() {
+		return nil
+	}
+	val := v.String()
+	if !strings.HasPrefix(val, "ENC(") || !strings.HasSuffix(val, ")") {
+		return nil
+	}
+	content := strings.TrimSuffix(strings.TrimPrefix(val, "ENC("), ")")
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return fmt.Errorf("ENC() 內容不能為空")
+	}
+	plain, err := crypto.Decrypt(content, keyset)
+	if err != nil {
+		return fmt.Errorf("解密欄位失敗: %w", err)
+	}
+	v.SetString(plain)
 	return nil
 }
 
