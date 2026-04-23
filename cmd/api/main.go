@@ -27,49 +27,46 @@ func main() {
 }
 
 // loadMasterKey 載入主密鑰
-// 從環境變量 MASTER_KEY 讀取 base64 編碼的 32 bytes 密鑰
-// 如果未設置，生成臨時隨機密鑰（開發環境）
+// 優先順序：MASTER_KEY env var → config security.encryption.master_key → 臨時隨機密鑰（開發環境）
 func loadMasterKey() ([]byte, error) {
 	ctx := context.Background()
-	masterKeyEnv := os.Getenv("MASTER_KEY")
 
-	logger.Info(ctx, "=== 檢查 MASTER_KEY 環境變量 ===", logger.WithDetails(map[string]interface{}{
-		"exists": masterKeyEnv != "",
-		"length": len(masterKeyEnv),
-	}))
+	raw := os.Getenv("MASTER_KEY")
+	source := "MASTER_KEY environment variable"
 
-	if masterKeyEnv != "" {
-		// 從環境變量讀取（base64 解碼）
-		masterKey, err := base64.StdEncoding.DecodeString(masterKeyEnv)
+	if raw == "" {
+		raw = config.Get().Security.Encryption.MasterKey
+		source = "config security.encryption.master_key"
+	}
+
+	if raw != "" {
+		masterKey, err := base64.StdEncoding.DecodeString(raw)
 		if err != nil {
 			logger.Error(ctx, "Master Key 格式錯誤", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 			return nil, fmt.Errorf("invalid master key configuration")
 		}
 
-		// 驗證長度必須是 32 bytes
 		if len(masterKey) != 32 {
 			logger.Error(ctx, "Master Key 長度錯誤", logger.WithDetails(map[string]interface{}{"expected": 32, "got": len(masterKey)}))
 			return nil, fmt.Errorf("invalid master key configuration")
 		}
 
-		// 遮罩顯示（只顯示前4個字元，其餘用*代替）
 		masked := fmt.Sprintf("%x****", masterKey[:2])
-		logger.Info(ctx, "[SUCCESS] 成功從環境變量載入主密鑰", logger.WithDetails(map[string]interface{}{
+		logger.Info(ctx, "[SUCCESS] 成功載入主密鑰", logger.WithDetails(map[string]interface{}{
 			"masked": masked,
 			"length": len(masterKey),
-			"source": "MASTER_KEY environment variable",
+			"source": source,
 		}))
 		return masterKey, nil
 	}
 
-	// 開發環境：生成臨時隨機密鑰
+	// 開發環境：生成臨時隨機密鑰（重啟後舊訊息將無法解密）
 	masterKey := make([]byte, 32)
 	if _, err := rand.Read(masterKey); err != nil {
 		logger.Error(ctx, "無法生成隨機密鑰", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 		return nil, fmt.Errorf("master key initialization failed")
 	}
 
-	// 遮罩顯示（只顯示前4個字元，其餘用*代替）
 	masked := fmt.Sprintf("%x****", masterKey[:2])
 	logger.Info(ctx, "[WARNING] 開發模式：使用臨時主密鑰（重啟後舊訊息將無法解密）", logger.WithDetails(map[string]interface{}{
 		"masked": masked,
