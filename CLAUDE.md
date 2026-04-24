@@ -20,7 +20,7 @@ Client → HTTP (Gin) → gRPC service → MongoDB
 - **Key manager**: Double-Check Locking with `sync.RWMutex`
 - **Pagination**: cursor-based (not offset)
 - **Rate limiting**: 3-tier (global / endpoint / IP), relaxed in `configs/local.yaml`
-- **Config**: `APP_ENV` selects `configs/{local,staging,development}.yaml`
+- **Config**: `APP_ENV` selects `configs/{local,development}.yaml`
 
 ## Commands
 
