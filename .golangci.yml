@@ -95,12 +95,10 @@ linters-settings:
   # Security check exclusions (false positives) - 安全性檢查排除項目 (誤報處理).
   gosec:
     excludes:
-      - G101 # Look for hardcoded credentials
       - G102 # Bind to all interfaces
       - G103 # Audit the use of unsafe block
       - G104 # Audit errors not checked
       - G106 # Audit the use of ssh.InsecureIgnoreHostKey
-      - G107 # Url provided to HTTP request as taint input
       - G108 # Use of net/http serve function that has no support for setting timeouts
       - G109 # Integer overflow in strconv.Atoi result (to int)
       - G110 # Potential DoS vulnerability via decompression bomb

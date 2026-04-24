@@ -207,13 +207,17 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 		}
 	}()
 
+	// 在 defer 清零 newKeyValue 之前，先 copy 一份給 cache 用（避免 use-after-zero）
+	keyValueForCache := make([]byte, 32)
+	copy(keyValueForCache, newKeyValue)
+
 	now := time.Now()
 	newVersion := oldKey.Version + 1
 
-	// 創建新密鑰
+	// 創建新密鑰（使用獨立 copy，不會被 defer 清零）
 	newKey := &Key{
 		ID:        roomID,
-		Value:     newKeyValue,
+		Value:     keyValueForCache,
 		CreatedAt: oldKey.CreatedAt,
 		RotatedAt: now,
 		Version:   newVersion,

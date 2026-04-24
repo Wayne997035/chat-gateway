@@ -80,7 +80,17 @@ type SecurityConfig struct {
 	TLS            TLSConfig            `mapstructure:"tls"`
 	Authentication AuthenticationConfig `mapstructure:"authentication"`
 	Encryption     EncryptionConfig     `mapstructure:"encryption"`
+	KeyRotation    KeyRotation          `mapstructure:"key_rotation"`
 	Audit          AuditConfig          `mapstructure:"audit"`
+	DataProtection DataProtectionConfig `mapstructure:"data_protection"`
+	AdminToken     string               `mapstructure:"admin_token"`
+	KeySet         string               `mapstructure:"key_set"`
+}
+
+// DataProtectionConfig 資料保護配置.
+type DataProtectionConfig struct {
+	EncryptionAtRest    bool `mapstructure:"encryption_at_rest"`
+	EncryptionInTransit bool `mapstructure:"encryption_in_transit"`
 }
 
 // TLSConfig TLS 配置.
@@ -103,6 +113,15 @@ type EncryptionConfig struct {
 	Enabled   bool   `mapstructure:"enabled"`
 	Algorithm string `mapstructure:"algorithm"`
 	KeyLength int    `mapstructure:"key_length"`
+	MasterKey string `mapstructure:"master_key"`
+}
+
+// KeyRotation 密鑰輪換策略配置.
+type KeyRotation struct {
+	Enabled               bool `mapstructure:"enabled"`
+	RotationIntervalHours int  `mapstructure:"rotation_interval_hours"`
+	MaxKeyAgeDays         int  `mapstructure:"max_key_age_days"`
+	KeepOldKeys           int  `mapstructure:"keep_old_keys"`
 }
 
 // AuditConfig 審計配置.
@@ -197,24 +216,28 @@ func Load(testCfg ...*Config) error {
 
 	// 初始化 Viper
 	v := viper.New()
+	v.SetConfigType("yaml")
 
-	// 檢查是否有 CONFIG_PATH 環境變數
+	// 決定配置檔案路徑
+	var filePath string
 	if configPath := os.Getenv("CONFIG_PATH"); configPath != "" {
-		// 使用 CONFIG_PATH 指定的檔案
-		v.SetConfigFile(configPath)
+		filePath = configPath
 		// 從檔案名稱推斷環境
 		baseName := filepath.Base(configPath)
 		ENV = strings.TrimSuffix(baseName, filepath.Ext(baseName))
 	} else {
-		// 使用預設的環境配置檔案
-		v.SetConfigName(ENV)
-		v.SetConfigType("yaml")
-		v.AddConfigPath("./configs")
+		filePath = filepath.Join("configs", ENV+".yaml")
 	}
 
-	// 讀取配置檔案
-	if err := v.ReadInConfig(); err != nil {
+	// 讀取並展開環境變數
+	// #nosec G304,G703 -- filePath 來自管理員設定的環境變數或固定的 ./configs/ 目錄，非使用者輸入
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
 		return fmt.Errorf("讀取配置檔案失敗: %w", err)
+	}
+	expanded := os.ExpandEnv(string(raw))
+	if err := v.ReadConfig(strings.NewReader(expanded)); err != nil {
+		return fmt.Errorf("解析配置檔案失敗: %w", err)
 	}
 
 	// 將配置綁定到結構體
@@ -251,15 +274,26 @@ func GetEnv() string {
 
 // validateConfig 驗證配置的有效性
 func validateConfig(cfg *Config) error {
-	// 驗證應用程式配置
+	if err := validateAppConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateDatabaseConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateLogConfig(cfg); err != nil {
+		return err
+	}
+	return validateSecurityConfig(cfg)
+}
+
+// validateAppConfig 驗證應用程式和伺服器配置
+func validateAppConfig(cfg *Config) error {
 	if cfg.App.Name == "" {
 		return fmt.Errorf("應用程式名稱不能為空")
 	}
 	if cfg.App.Version == "" {
 		return fmt.Errorf("應用程式版本不能為空")
 	}
-
-	// 驗證伺服器配置
 	if cfg.Server.Host == "" {
 		return fmt.Errorf("伺服器主機不能為空")
 	}
@@ -269,8 +303,11 @@ func validateConfig(cfg *Config) error {
 	if cfg.Server.Timeout <= 0 {
 		return fmt.Errorf("伺服器超時時間必須大於 0")
 	}
+	return nil
+}
 
-	// 驗證資料庫配置
+// validateDatabaseConfig 驗證資料庫配置
+func validateDatabaseConfig(cfg *Config) error {
 	if cfg.Database.Mongo.URL == "" {
 		return fmt.Errorf("MongoDB URL 不能為空")
 	}
@@ -283,8 +320,11 @@ func validateConfig(cfg *Config) error {
 	if cfg.Database.Mongo.MinPoolSize > cfg.Database.Mongo.MaxPoolSize {
 		return fmt.Errorf("MongoDB 最小連接池大小不能大於最大連接池大小")
 	}
+	return nil
+}
 
-	// 驗證日誌配置
+// validateLogConfig 驗證日誌配置
+func validateLogConfig(cfg *Config) error {
 	if cfg.Log.RotationTimeHours <= 0 {
 		return fmt.Errorf("日誌輪轉時間必須大於 0")
 	}
@@ -294,7 +334,20 @@ func validateConfig(cfg *Config) error {
 	if cfg.Log.MaxSizeMB <= 0 {
 		return fmt.Errorf("日誌檔案最大大小必須大於 0")
 	}
+	return nil
+}
 
+// validateSecurityConfig 驗證安全配置（非 local 環境才強制檢查，local 環境使用臨時隨機密鑰）
+func validateSecurityConfig(cfg *Config) error {
+	if ENV == "local" {
+		return nil
+	}
+	if cfg.Security.Encryption.Enabled && cfg.Security.Encryption.MasterKey == "" {
+		return fmt.Errorf("security.encryption.master_key is required when encryption is enabled (set MASTER_KEY env var)")
+	}
+	if cfg.Security.Authentication.JWTEnabled && cfg.Security.Authentication.JWTSecret == "" {
+		return fmt.Errorf("security.authentication.jwt_secret is required when JWT is enabled (set JWT_SECRET env var)")
+	}
 	return nil
 }
 
