@@ -21,6 +21,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -82,10 +83,13 @@ func NewServer(
 		if err != nil {
 			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
 		}
-		grpcServer = grpc.NewServer(grpc.Creds(tlsCreds))
+		grpcServer = grpc.NewServer(
+			grpc.Creds(tlsCreds),
+			grpc.UnaryInterceptor(traceServerInterceptor),
+		)
 		logger.Info(ctx, "gRPC TLS 已啟用")
 	} else {
-		grpcServer = grpc.NewServer()
+		grpcServer = grpc.NewServer(grpc.UnaryInterceptor(traceServerInterceptor))
 		logger.Info(ctx, "gRPC 以非加密模式運行（開發環境）")
 	}
 
@@ -147,6 +151,22 @@ func loadTLSCredentials(tlsConfig config.TLSConfig) (credentials.TransportCreden
 	}
 
 	return credentials.NewTLS(config), nil
+}
+
+// traceServerInterceptor extracts x-trace-id from incoming gRPC metadata and
+// stores it in the context so downstream handlers can use it.
+func traceServerInterceptor(
+	ctx context.Context,
+	req interface{},
+	_ *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (interface{}, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-trace-id"); len(vals) > 0 {
+			ctx = logger.WithTraceID(ctx, vals[0])
+		}
+	}
+	return handler(ctx, req)
 }
 
 // Start 啟動 gRPC 服務器

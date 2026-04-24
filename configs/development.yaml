@@ -33,9 +33,7 @@ database:
     tls_insecure_skip_verify: false
 
 log:
-  rotation_time_hours: 24
-  max_age_days: 7
-  max_size_mb: 100
+  level: "info"
 
 security:
   tls:
@@ -53,24 +51,12 @@ security:
     enabled: true
     algorithm: "AES-256-GCM"
     key_length: 256
+    kek_keyset: "${CRYPTO_KEK_KEYSET}"
     master_key: "${MASTER_KEY}"
-
-  key_rotation:
-    enabled: false
-    rotation_interval_hours: 24
-    max_key_age_days: 30
-    keep_old_keys: 5
-
-  admin_token: "${ADMIN_TOKEN}"
-  key_set: "${CONFIG_KEYSET}"
 
   audit:
     enabled: true
     level: "INFO"
-
-  data_protection:
-    encryption_at_rest: true
-    encryption_in_transit: true
 
 limits:
   request:

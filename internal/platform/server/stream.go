@@ -8,6 +8,7 @@ import (
 	"chat-gateway/internal/constants"
 	"chat-gateway/internal/grpcclient"
 	"chat-gateway/internal/platform/config"
+	"chat-gateway/internal/platform/logger"
 	"chat-gateway/proto/chat"
 
 	"github.com/gin-gonic/gin"
@@ -64,8 +65,16 @@ func createGRPCStream(c *gin.Context, roomID, userID string) (chat.ChatRoomServi
 		return nil, false
 	}
 
+	// Use context.Background() so the gRPC stream is not canceled when the
+	// HTTP request context is done (SSE long-lived connection). Only the
+	// trace_id is copied — not the cancellation signal.
+	streamCtx := context.Background()
+	if traceID := logger.GetTraceID(c.Request.Context()); traceID != "" {
+		streamCtx = logger.WithTraceID(streamCtx, traceID)
+	}
+
 	client := chat.NewChatRoomServiceClient(conn)
-	stream, err := client.StreamMessages(context.Background(), &chat.StreamMessagesRequest{
+	stream, err := client.StreamMessages(streamCtx, &chat.StreamMessagesRequest{
 		RoomId: roomID,
 		UserId: userID,
 	})

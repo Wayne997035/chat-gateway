@@ -1,6 +1,7 @@
 package grpcclient
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -8,10 +9,12 @@ import (
 	"sync"
 
 	"chat-gateway/internal/platform/config"
+	"chat-gateway/internal/platform/logger"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -99,13 +102,36 @@ func dialWithTLS(address string, tlsConfig config.TLSConfig) (*grpc.ClientConn, 
 		})
 	}
 
-	return grpc.NewClient(address, grpc.WithTransportCredentials(tlsCreds))
+	return grpc.NewClient(address,
+		grpc.WithTransportCredentials(tlsCreds),
+		grpc.WithUnaryInterceptor(traceClientInterceptor()),
+	)
 }
 
 // dialInsecure 不使用 TLS 連接（僅開發環境）
 func dialInsecure(address string) (*grpc.ClientConn, error) {
 	fmt.Println("[WARNING] gRPC 使用不安全連接（開發環境）")
-	return grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	return grpc.NewClient(address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(traceClientInterceptor()),
+	)
+}
+
+// traceClientInterceptor propagates trace_id from context into gRPC outgoing metadata.
+func traceClientInterceptor() grpc.UnaryClientInterceptor {
+	return func(
+		ctx context.Context,
+		method string,
+		req, reply interface{},
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		if traceID := logger.GetTraceID(ctx); traceID != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, "x-trace-id", traceID)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
 }
 
 // CloseConnection 關閉 gRPC 連接

@@ -70,9 +70,7 @@ type MongoConfig struct {
 
 // LogConfig 日誌配置.
 type LogConfig struct {
-	RotationTimeHours int `mapstructure:"rotation_time_hours"` // 日誌輪轉時間 (小時).
-	MaxAgeDays        int `mapstructure:"max_age_days"`        // 日誌保留天數.
-	MaxSizeMB         int `mapstructure:"max_size_mb"`         // 單個日誌檔案最大大小 (MB).
+	Level string `mapstructure:"level"` // 日誌級別: debug, info, warn, error.
 }
 
 // SecurityConfig 安全配置.
@@ -80,17 +78,7 @@ type SecurityConfig struct {
 	TLS            TLSConfig            `mapstructure:"tls"`
 	Authentication AuthenticationConfig `mapstructure:"authentication"`
 	Encryption     EncryptionConfig     `mapstructure:"encryption"`
-	KeyRotation    KeyRotation          `mapstructure:"key_rotation"`
 	Audit          AuditConfig          `mapstructure:"audit"`
-	DataProtection DataProtectionConfig `mapstructure:"data_protection"`
-	AdminToken     string               `mapstructure:"admin_token"`
-	KeySet         string               `mapstructure:"key_set"`
-}
-
-// DataProtectionConfig 資料保護配置.
-type DataProtectionConfig struct {
-	EncryptionAtRest    bool `mapstructure:"encryption_at_rest"`
-	EncryptionInTransit bool `mapstructure:"encryption_in_transit"`
 }
 
 // TLSConfig TLS 配置.
@@ -113,15 +101,8 @@ type EncryptionConfig struct {
 	Enabled   bool   `mapstructure:"enabled"`
 	Algorithm string `mapstructure:"algorithm"`
 	KeyLength int    `mapstructure:"key_length"`
-	MasterKey string `mapstructure:"master_key"`
-}
-
-// KeyRotation 密鑰輪換策略配置.
-type KeyRotation struct {
-	Enabled               bool `mapstructure:"enabled"`
-	RotationIntervalHours int  `mapstructure:"rotation_interval_hours"`
-	MaxKeyAgeDays         int  `mapstructure:"max_key_age_days"`
-	KeepOldKeys           int  `mapstructure:"keep_old_keys"`
+	KEKKeyset string `mapstructure:"kek_keyset"` // Tink JSON keyset, base64-encoded (set via CRYPTO_KEK_KEYSET)
+	MasterKey string `mapstructure:"master_key"` // Legacy 32-byte raw key, base64-encoded; retained for gcm: migration
 }
 
 // AuditConfig 審計配置.
@@ -249,6 +230,9 @@ func Load(testCfg ...*Config) error {
 	// 從環境變數覆蓋 MongoDB 設定
 	overrideMongoConfigFromEnv(config)
 
+	// 從環境變數覆蓋安全設定
+	overrideSecurityConfigFromEnv(config)
+
 	// 驗證配置
 	if err := validateConfig(config); err != nil {
 		return fmt.Errorf("配置驗證失敗: %w", err)
@@ -324,26 +308,17 @@ func validateDatabaseConfig(cfg *Config) error {
 }
 
 // validateLogConfig 驗證日誌配置
-func validateLogConfig(cfg *Config) error {
-	if cfg.Log.RotationTimeHours <= 0 {
-		return fmt.Errorf("日誌輪轉時間必須大於 0")
-	}
-	if cfg.Log.MaxAgeDays <= 0 {
-		return fmt.Errorf("日誌保留天數必須大於 0")
-	}
-	if cfg.Log.MaxSizeMB <= 0 {
-		return fmt.Errorf("日誌檔案最大大小必須大於 0")
-	}
+func validateLogConfig(_ *Config) error {
 	return nil
 }
 
-// validateSecurityConfig 驗證安全配置（非 local 環境才強制檢查，local 環境使用臨時隨機密鑰）
+// validateSecurityConfig 驗證安全配置（非 local 環境才強制檢查）
 func validateSecurityConfig(cfg *Config) error {
 	if ENV == "local" {
 		return nil
 	}
-	if cfg.Security.Encryption.Enabled && cfg.Security.Encryption.MasterKey == "" {
-		return fmt.Errorf("security.encryption.master_key is required when encryption is enabled (set MASTER_KEY env var)")
+	if cfg.Security.Encryption.Enabled && cfg.Security.Encryption.KEKKeyset == "" {
+		return fmt.Errorf("security.encryption.kek_keyset is required when encryption is enabled (set CRYPTO_KEK_KEYSET env var)")
 	}
 	if cfg.Security.Authentication.JWTEnabled && cfg.Security.Authentication.JWTSecret == "" {
 		return fmt.Errorf("security.authentication.jwt_secret is required when JWT is enabled (set JWT_SECRET env var)")
@@ -419,6 +394,17 @@ func overrideMongoConfigFromEnv(cfg *Config) {
 
 	if tlsKeyFile := os.Getenv("MONGO_TLS_KEY_FILE"); tlsKeyFile != "" {
 		cfg.Database.Mongo.TLSKeyFile = tlsKeyFile
+	}
+}
+
+// overrideSecurityConfigFromEnv 從環境變數覆蓋安全設定.
+func overrideSecurityConfigFromEnv(cfg *Config) {
+	if ks := os.Getenv("CRYPTO_KEK_KEYSET"); ks != "" {
+		cfg.Security.Encryption.KEKKeyset = ks
+	}
+
+	if mk := os.Getenv("MASTER_KEY"); mk != "" {
+		cfg.Security.Encryption.MasterKey = mk
 	}
 }
 
