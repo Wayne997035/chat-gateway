@@ -78,6 +78,40 @@ func loadMasterKey() ([]byte, error) {
 	return masterKey, nil
 }
 
+// applyKeyRotationPolicy 從 config 讀取密鑰輪換策略並套用到密鑰管理器.
+func applyKeyRotationPolicy(ctx context.Context, km *keymanager.KeyManagerWithPersistence, cfg *config.Config) {
+	kr := cfg.Security.KeyRotation
+	if !kr.Enabled {
+		return
+	}
+
+	rotationIntervalHours := kr.RotationIntervalHours
+	if rotationIntervalHours <= 0 {
+		rotationIntervalHours = 24
+	}
+	maxKeyAgeDays := kr.MaxKeyAgeDays
+	if maxKeyAgeDays <= 0 {
+		maxKeyAgeDays = 30
+	}
+	keepOldKeys := kr.KeepOldKeys
+	if keepOldKeys <= 0 {
+		keepOldKeys = 5
+	}
+
+	km.SetRotationPolicy(keymanager.RotationPolicy{
+		Enabled:          true,
+		RotationInterval: time.Duration(rotationIntervalHours) * time.Hour,
+		MaxKeyAge:        time.Duration(maxKeyAgeDays) * 24 * time.Hour,
+		KeepOldKeys:      keepOldKeys,
+	})
+	km.StartAutoRotation()
+	logger.Info(ctx, "[KeyManager] 自動密鑰輪換已啟用（由配置驅動）", logger.WithDetails(map[string]interface{}{
+		"rotation_interval_hours": rotationIntervalHours,
+		"max_key_age_days":        maxKeyAgeDays,
+		"keep_old_keys":           keepOldKeys,
+	}))
+}
+
 // mainNoExit 分離主要邏輯以避免 exitAfterDefer 問題，確保 defer 函數正常執行.
 func mainNoExit() error {
 	// 初始化日誌.
@@ -136,10 +170,12 @@ func mainNoExit() error {
 			return fmt.Errorf("encryption initialization failed")
 		}
 
-		// 啟用自動密鑰輪換（可選）
-		if os.Getenv("KEY_ROTATION_ENABLED") == "true" {
-			keyManager.StartAutoRotation()
-			logger.Info(ctx, "[KeyManager] 自動密鑰輪換已啟用")
+		// 從配置讀取密鑰輪換策略
+		applyKeyRotationPolicy(ctx, keyManager, cfg)
+
+		// 確保 shutdown 時停止自動輪換 goroutine
+		if cfg.Security.KeyRotation.Enabled {
+			defer keyManager.StopAutoRotation()
 		}
 	}
 

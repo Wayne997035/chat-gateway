@@ -1,7 +1,7 @@
 app:
   name: "chat-gateway"
   version: "1.0.0"
-  debug: true
+  debug: false
 
 server:
   host: "0.0.0.0"
@@ -56,7 +56,7 @@ security:
     master_key: "${MASTER_KEY}"
 
   key_rotation:
-    enabled: false
+    enabled: true
     rotation_interval_hours: 24
     max_key_age_days: 30
     keep_old_keys: 5
@@ -78,14 +78,14 @@ limits:
     max_multipart_memory: 10485760
   rate_limiting:
     enabled: true
-    default_per_minute: 600
-    messages_per_minute: 60
-    rooms_per_minute: 30
-    sse_per_minute: 300
+    default_per_minute: 120
+    messages_per_minute: 20
+    rooms_per_minute: 5
+    sse_per_minute: 60
     cleanup_interval_minutes: 10
   sse:
-    max_connections_per_ip: 10
-    max_total_connections: 10000
+    max_connections_per_ip: 3
+    max_total_connections: 1000
     min_connection_interval_seconds: 1
     heartbeat_interval_seconds: 15
     cleanup_interval_minutes: 10

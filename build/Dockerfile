@@ -22,24 +22,23 @@ FROM --platform=linux/amd64 alpine:3.21
 
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -S appgroup && adduser -S -u 1000 -G appgroup appuser
-
 # Create directories for config and log
-RUN mkdir -p ./config ./log && chown -R appuser:appgroup /app
+RUN mkdir -p ./config ./log
+
+# Add non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 COPY --from=builder /chat_gateway .
+COPY --from=builder /app/configs ./config
 
 ENV CONFIG_PATH=/app/config/production.yaml
 ENV LOG_PATH=/app/log
 ENV ENV=production
 
-EXPOSE 8080
+USER appuser
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost:8080/health || exit 1
-
-USER appuser
+  CMD wget -qO- http://localhost:8080/health || exit 1
 
 # start service
 CMD ["./chat_gateway"]

@@ -8,8 +8,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -54,12 +52,8 @@ func NewKeyManagerWithPersistence(masterKey []byte, db *mongo.Database) (*KeyMan
 	// 啟動時清理過期密鑰
 	go func() {
 		count, err := km.store.DeleteExpiredKeys(context.Background())
-		if err != nil {
-			slog.Error("failed to delete expired keys on startup", "error", err)
-			return
-		}
-		if count > 0 {
-			slog.Info("deleted expired keys on startup", "count", count)
+		if err == nil && count > 0 {
+			fmt.Printf("Cleaned up %d expired keys\n", count)
 		}
 	}()
 
@@ -79,10 +73,7 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 	km.mu.RUnlock()
 
 	if exists && key.Status == KeyStatusActive {
-		// 回傳 copy，避免呼叫方修改內部 slice
-		valueCopy := make([]byte, len(key.Value))
-		copy(valueCopy, key.Value)
-		return valueCopy, nil
+		return key.Value, nil
 	}
 
 	// 獲取寫鎖以進行創建或加載（慢速路徑）
@@ -91,9 +82,7 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 
 	// 第二次檢查：其他協程可能已經創建了密鑰
 	if key, exists := km.keys[roomID]; exists && key.Status == KeyStatusActive {
-		valueCopy := make([]byte, len(key.Value))
-		copy(valueCopy, key.Value)
-		return valueCopy, nil
+		return key.Value, nil
 	}
 
 	// 從數據庫加載（在鎖內執行，確保只有一個協程執行）
@@ -104,19 +93,16 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 	}
 
 	if keyDoc != nil {
-		// 解密密鑰（僅支援 GCM 格式，DB 已確認全部為 gcm: 格式）
+		// 解密密鑰
 		roomKey, err := km.decryptRoomKey(keyDoc.EncryptedKey)
 		if err != nil {
 			return nil, fmt.Errorf("key decryption error")
 		}
 
-		// 加載到緩存（使用 copy 防止外部修改）
-		roomKeyCopy := make([]byte, len(roomKey))
-		copy(roomKeyCopy, roomKey)
-
+		// 加載到緩存
 		key := &Key{
 			ID:        roomID,
-			Value:     roomKeyCopy,
+			Value:     roomKey,
 			CreatedAt: keyDoc.CreatedAt,
 			RotatedAt: keyDoc.RotatedAt,
 			Version:   keyDoc.KeyVersion,
@@ -124,10 +110,7 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 		}
 		km.keys[roomID] = key
 
-		// 回傳另一份 copy（安全增強：避免返回內部引用）
-		returnCopy := make([]byte, len(roomKey))
-		copy(returnCopy, roomKey)
-		return returnCopy, nil
+		return roomKey, nil
 	}
 
 	// 密鑰不存在，創建新密鑰（已持有寫鎖，安全）
@@ -139,9 +122,7 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte, error) {
 	// 再次檢查（防止並發創建）
 	if key, exists := km.keys[roomID]; exists && key.Status == KeyStatusActive {
-		keyCopy := make([]byte, len(key.Value))
-		copy(keyCopy, key.Value)
-		return keyCopy, nil
+		return key.Value, nil
 	}
 
 	// 生成 256-bit 隨機密鑰
@@ -226,17 +207,17 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 		}
 	}()
 
-	now := time.Now()
-	newVersion := oldKey.Version + 1
-
-	// 為緩存創建獨立的副本（避免被 defer 清零）
+	// 在 defer 清零 newKeyValue 之前，先 copy 一份給 cache 用（避免 use-after-zero）
 	keyValueForCache := make([]byte, 32)
 	copy(keyValueForCache, newKeyValue)
 
-	// 創建新密鑰
+	now := time.Now()
+	newVersion := oldKey.Version + 1
+
+	// 創建新密鑰（使用獨立 copy，不會被 defer 清零）
 	newKey := &Key{
 		ID:        roomID,
-		Value:     keyValueForCache, // 使用副本，不會被清零
+		Value:     keyValueForCache,
 		CreatedAt: oldKey.CreatedAt,
 		RotatedAt: now,
 		Version:   newVersion,
@@ -286,74 +267,62 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	return nil
 }
 
-const gcmEncryptedPrefix = "gcm:"
-
-// encryptRoomKey 用 Master Key 加密 Room Key（AES-256-GCM）
+// encryptRoomKey 用 Master Key 加密 Room Key
 func (km *KeyManagerWithPersistence) encryptRoomKey(roomKey []byte) (string, error) {
 	block, err := aes.NewCipher(km.masterKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
 
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
+	// 生成隨機 IV
+	ciphertext := make([]byte, aes.BlockSize+len(roomKey))
+	iv := ciphertext[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", fmt.Errorf("failed to generate IV: %w", err)
 	}
 
-	// 生成隨機 nonce（12 bytes for GCM）
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil { // #nosec G407 -- nonce from crypto/rand
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
+	// 使用 CTR 模式加密
+	// #nosec G407 -- IV is dynamically generated from crypto/rand above, not hardcoded
+	stream := cipher.NewCTR(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], roomKey)
 
-	// Seal: nonce | ciphertext | authTag
-	ciphertext := gcm.Seal(nonce, nonce, roomKey, nil)
-
-	return gcmEncryptedPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
+	// Base64 編碼
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// decryptRoomKey 用 Master Key 解密 Room Key（僅支援 GCM 格式）.
-// DB 已確認所有 room key 均為 gcm: 格式，CTR 格式已不存在.
+// decryptRoomKey 用 Master Key 解密 Room Key
 func (km *KeyManagerWithPersistence) decryptRoomKey(encryptedKey string) ([]byte, error) {
-	if !strings.HasPrefix(encryptedKey, gcmEncryptedPrefix) {
-		return nil, fmt.Errorf("unsupported key format")
-	}
-	return km.decryptRoomKeyGCM(encryptedKey[len(gcmEncryptedPrefix):])
-}
-
-// decryptRoomKeyGCM 解密 GCM 格式的 Room Key.
-func (km *KeyManagerWithPersistence) decryptRoomKeyGCM(encoded string) ([]byte, error) {
-	data, err := base64.StdEncoding.DecodeString(encoded)
+	// Base64 解碼
+	ciphertext, err := base64.StdEncoding.DecodeString(encryptedKey)
 	if err != nil {
 		return nil, fmt.Errorf("decryption error")
 	}
 
+	// 使用完後清零 ciphertext（安全增強）
 	defer func() {
-		for i := range data {
-			data[i] = 0
+		for i := range ciphertext {
+			ciphertext[i] = 0
 		}
 	}()
+
+	if len(ciphertext) < aes.BlockSize {
+		return nil, fmt.Errorf("invalid encrypted data")
+	}
 
 	block, err := aes.NewCipher(km.masterKey)
 	if err != nil {
 		return nil, fmt.Errorf("decryption error")
 	}
 
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("decryption error")
-	}
+	// 提取 IV
+	iv := ciphertext[:aes.BlockSize]
+	encryptedData := ciphertext[aes.BlockSize:]
 
-	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
-		return nil, fmt.Errorf("invalid encrypted data")
-	}
-
-	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("decryption error")
-	}
+	// 使用 CTR 模式解密
+	// #nosec G407 -- IV is extracted from encrypted data, not hardcoded
+	stream := cipher.NewCTR(block, iv)
+	plaintext := make([]byte, len(encryptedData))
+	stream.XORKeyStream(plaintext, encryptedData)
 
 	return plaintext, nil
 }
@@ -370,7 +339,7 @@ func (km *KeyManagerWithPersistence) LoadAllKeys(ctx context.Context, roomID str
 	defer km.mu.Unlock()
 
 	for _, keyDoc := range keyDocs {
-		// 解密密鑰（僅支援 GCM 格式，DB 已確認全部為 gcm: 格式）
+		// 解密密鑰
 		roomKey, err := km.decryptRoomKey(keyDoc.EncryptedKey)
 		if err != nil {
 			return fmt.Errorf("failed to decrypt room key (version %d): %w", keyDoc.KeyVersion, err)
@@ -457,66 +426,6 @@ func (km *KeyManagerWithPersistence) GetKeyInfo(roomID string) (*KeyInfo, error)
 	}, nil
 }
 
-// GetKeyByVersion 根據版本號取得 Room Key bytes（版本不在 memory 時查 DB）.
-func (km *KeyManagerWithPersistence) GetKeyByVersion(roomID string, version int) ([]byte, error) {
-	km.mu.RLock()
-	activeKey, ok := km.keys[roomID]
-	km.mu.RUnlock()
-
-	if ok && activeKey.Version == version {
-		// 回傳 copy，避免呼叫方修改內部 slice
-		keyCopy := make([]byte, len(activeKey.Value))
-		copy(keyCopy, activeKey.Value)
-		return keyCopy, nil
-	}
-
-	// 非活躍版本：從 DB 查詢（memory 中的舊 key 在 rotation 後已清零）
-	ctx := context.Background()
-	keyDoc, err := km.store.GetKeyByVersion(ctx, roomID, version)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get key version %d for room %s: %w", version, roomID, err)
-	}
-	if keyDoc == nil {
-		return nil, fmt.Errorf("key version %d not found for room %s", version, roomID)
-	}
-
-	plaintext, err := km.decryptRoomKey(keyDoc.EncryptedKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt key version %d for room %s: %w", version, roomID, err)
-	}
-	return plaintext, nil
-}
-
-// GetActiveKeyWithVersion 原子性地取得活躍 key bytes 與版本號.
-// 避免 GetOrCreateRoomKey + GetKeyInfo 兩次呼叫之間發生 key rotation 導致版本不一致.
-func (km *KeyManagerWithPersistence) GetActiveKeyWithVersion(roomID string) (keyBytes []byte, version int, err error) {
-	km.mu.RLock()
-	key, ok := km.keys[roomID]
-	if ok {
-		keyCopy := make([]byte, len(key.Value))
-		copy(keyCopy, key.Value)
-		version := key.Version
-		km.mu.RUnlock()
-		return keyCopy, version, nil
-	}
-	km.mu.RUnlock()
-
-	// key 不在 memory，透過 GetOrCreateRoomKey 確保載入後再以 RLock 讀取版本
-	if _, err := km.GetOrCreateRoomKey(roomID); err != nil {
-		return nil, 0, err
-	}
-
-	km.mu.RLock()
-	defer km.mu.RUnlock()
-	key, ok = km.keys[roomID]
-	if !ok {
-		return nil, 0, fmt.Errorf("key not found for room %s after creation", roomID)
-	}
-	keyCopy := make([]byte, len(key.Value))
-	copy(keyCopy, key.Value)
-	return keyCopy, key.Version, nil
-}
-
 // SetRotationPolicy 設置密鑰輪換策略
 func (km *KeyManagerWithPersistence) SetRotationPolicy(policy RotationPolicy) {
 	km.mu.Lock()
@@ -581,14 +490,10 @@ func (km *KeyManagerWithPersistence) checkAndRotateKeys() {
 
 	// 輪換需要輪換的密鑰
 	for _, roomID := range keysToRotate {
-		roomIDPrefix := roomID
-		if len(roomIDPrefix) > 8 {
-			roomIDPrefix = roomIDPrefix[:8] + "..."
-		}
 		if err := km.rotateKey(roomID); err != nil {
-			slog.Error("failed to rotate key for room", "room_id_prefix", roomIDPrefix, "error", err)
+			fmt.Printf("Failed to rotate key for room %s: %v\n", roomID, err)
 		} else {
-			slog.Info("successfully rotated key for room", "room_id_prefix", roomIDPrefix)
+			fmt.Printf("Successfully rotated key for room %s\n", roomID)
 		}
 	}
 }
