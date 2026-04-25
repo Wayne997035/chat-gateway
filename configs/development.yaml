@@ -58,6 +58,12 @@ security:
     enabled: true
     level: "INFO"
 
+  key_rotation:
+    enabled: ${KEY_ROTATION_ENABLED}
+    rotation_interval_hours: ${KEY_ROTATION_INTERVAL_HOURS}
+    max_key_age_days: ${KEY_ROTATION_MAX_AGE_DAYS}
+    keep_old_keys: ${KEY_ROTATION_KEEP_OLD_KEYS}
+
 limits:
   request:
     max_body_size: 10485760

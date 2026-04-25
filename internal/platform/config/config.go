@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -79,6 +80,7 @@ type SecurityConfig struct {
 	Authentication AuthenticationConfig `mapstructure:"authentication"`
 	Encryption     EncryptionConfig     `mapstructure:"encryption"`
 	Audit          AuditConfig          `mapstructure:"audit"`
+	KeyRotation    KeyRotationConfig    `mapstructure:"key_rotation"`
 }
 
 // TLSConfig TLS 配置.
@@ -109,6 +111,14 @@ type EncryptionConfig struct {
 type AuditConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Level   string `mapstructure:"level"`
+}
+
+// KeyRotationConfig 密鑰輪換策略配置.
+type KeyRotationConfig struct {
+	Enabled               bool `mapstructure:"enabled"`
+	RotationIntervalHours int  `mapstructure:"rotation_interval_hours"`
+	MaxKeyAgeDays         int  `mapstructure:"max_key_age_days"`
+	KeepOldKeys           int  `mapstructure:"keep_old_keys"`
 }
 
 // LimitsConfig 限制配置.
@@ -233,6 +243,9 @@ func Load(testCfg ...*Config) error {
 	// 從環境變數覆蓋安全設定
 	overrideSecurityConfigFromEnv(config)
 
+	// 從環境變數覆蓋密鑰輪換設定（並套用預設值）
+	overrideKeyRotationFromEnv(&config.Security.KeyRotation)
+
 	// 驗證配置
 	if err := validateConfig(config); err != nil {
 		return fmt.Errorf("配置驗證失敗: %w", err)
@@ -308,12 +321,49 @@ func validateDatabaseConfig(cfg *Config) error {
 }
 
 // validateLogConfig 驗證日誌配置
-func validateLogConfig(_ *Config) error {
-	return nil
+func validateLogConfig(cfg *Config) error {
+	level := cfg.Log.Level
+	if level == "" {
+		return nil
+	}
+	switch level {
+	case "debug", "info", "warn", "error":
+		return nil
+	default:
+		return fmt.Errorf("log.level must be one of debug/info/warn/error, got %q", level)
+	}
 }
 
-// validateSecurityConfig 驗證安全配置（非 local 環境才強制檢查）
+// validateSecurityConfig 驗證安全配置.
+// 不論環境，以下規則恆成立：
+//   - encryption.algorithm 若非空必須為 "AES-256-GCM"
+//   - encryption.key_length 若非零必須為 256
+//   - key_rotation.enabled=true 時，MaxKeyAgeDays*24 > RotationIntervalHours
+//
+// 僅在非 local 環境才強制檢查 credentials：
+//   - encryption enabled → kek_keyset 必須非空
+//   - jwt enabled → jwt_secret 必須非空
 func validateSecurityConfig(cfg *Config) error {
+	// 恆成立的規則（所有環境）
+	if alg := cfg.Security.Encryption.Algorithm; alg != "" && alg != "AES-256-GCM" {
+		return fmt.Errorf("security.encryption.algorithm must be \"AES-256-GCM\", got %q", alg)
+	}
+	if kl := cfg.Security.Encryption.KeyLength; kl != 0 && kl != 256 {
+		return fmt.Errorf("security.encryption.key_length must be 256, got %d", kl)
+	}
+	if kr := cfg.Security.KeyRotation; kr.Enabled {
+		if kr.RotationIntervalHours <= 0 {
+			return fmt.Errorf("security.key_rotation.rotation_interval_hours must be > 0 when enabled")
+		}
+		if kr.MaxKeyAgeDays*24 <= kr.RotationIntervalHours {
+			return fmt.Errorf(
+				"security.key_rotation: max_key_age_days*24 (%d) must be greater than rotation_interval_hours (%d)",
+				kr.MaxKeyAgeDays*24, kr.RotationIntervalHours,
+			)
+		}
+	}
+
+	// Credential checks — skipped in local env
 	if ENV == "local" {
 		return nil
 	}
@@ -405,6 +455,36 @@ func overrideSecurityConfigFromEnv(cfg *Config) {
 
 	if mk := os.Getenv("MASTER_KEY"); mk != "" {
 		cfg.Security.Encryption.MasterKey = mk
+	}
+}
+
+// overrideKeyRotationFromEnv 從環境變數覆蓋密鑰輪換設定，並在未設定時套用預設值.
+// development.yaml 使用純 ${VAR} 語法（os.ExpandEnv 不支援 ${VAR:default}），
+// 因此預設值由此函數提供。
+func overrideKeyRotationFromEnv(kr *KeyRotationConfig) {
+	if v := os.Getenv("KEY_ROTATION_ENABLED"); v != "" {
+		kr.Enabled = v == "true"
+	}
+	if v := os.Getenv("KEY_ROTATION_INTERVAL_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			kr.RotationIntervalHours = n
+		}
+	} else if kr.RotationIntervalHours == 0 {
+		kr.RotationIntervalHours = 24
+	}
+	if v := os.Getenv("KEY_ROTATION_MAX_AGE_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			kr.MaxKeyAgeDays = n
+		}
+	} else if kr.MaxKeyAgeDays == 0 {
+		kr.MaxKeyAgeDays = 30
+	}
+	if v := os.Getenv("KEY_ROTATION_KEEP_OLD_KEYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			kr.KeepOldKeys = n
+		}
+	} else if kr.KeepOldKeys == 0 {
+		kr.KeepOldKeys = 5
 	}
 }
 

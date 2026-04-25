@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/tink-crypto/tink-go/v2/aead"
 	"github.com/tink-crypto/tink-go/v2/keyset"
@@ -12,6 +13,7 @@ import (
 	mongocontainer "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.uber.org/zap"
 
 	"chat-gateway/internal/security/keymanager"
 )
@@ -168,7 +170,7 @@ func TestDecryptGCMLegacy_InvalidBase64(t *testing.T) {
 func TestNewKeyManagerWithPersistence_NilKEK_NoDocker(t *testing.T) {
 	t.Parallel()
 
-	_, err := keymanager.NewKeyManagerWithPersistence(nil, nil, nil)
+	_, err := keymanager.NewKeyManagerWithPersistence(nil, nil, nil, zap.NewNop())
 	if err == nil {
 		t.Fatal("expected error for nil kek, got nil")
 	}
@@ -181,9 +183,73 @@ func TestNewKeyManagerWithPersistence_BadLegacyKey_NoDocker(t *testing.T) {
 
 	kek := newTestAEAD(t)
 
-	_, err := keymanager.NewKeyManagerWithPersistence(kek, []byte("too-short"), nil)
+	_, err := keymanager.NewKeyManagerWithPersistence(kek, []byte("too-short"), nil, zap.NewNop())
 	if err == nil {
 		t.Fatal("expected error for wrong-length legacy key, got nil")
+	}
+}
+
+// TestSetRotationPolicy verifies that SetRotationPolicy correctly updates all fields.
+func TestSetRotationPolicy(t *testing.T) {
+	db := startMongoDB(t)
+	kekAEAD := newTestAEAD(t)
+
+	tests := []struct {
+		name   string
+		policy keymanager.RotationPolicy
+	}{
+		{
+			name: "enabled with 12h interval and 15 day max age",
+			policy: keymanager.RotationPolicy{
+				Enabled:          true,
+				RotationInterval: 12 * time.Hour,
+				MaxKeyAge:        15 * 24 * time.Hour,
+				KeepOldKeys:      3,
+			},
+		},
+		{
+			name: "disabled policy zeroes out fields",
+			policy: keymanager.RotationPolicy{
+				Enabled:          false,
+				RotationInterval: 0,
+				MaxKeyAge:        0,
+				KeepOldKeys:      0,
+			},
+		},
+		{
+			name: "large interval values",
+			policy: keymanager.RotationPolicy{
+				Enabled:          true,
+				RotationInterval: 168 * time.Hour, // 7 days
+				MaxKeyAge:        365 * 24 * time.Hour,
+				KeepOldKeys:      10,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			km, err := keymanager.NewKeyManagerWithPersistence(kekAEAD, nil, db, zap.NewNop())
+			if err != nil {
+				t.Fatalf("create km: %v", err)
+			}
+
+			km.SetRotationPolicy(tc.policy)
+
+			got := km.GetRotationPolicy()
+			if got.Enabled != tc.policy.Enabled {
+				t.Errorf("Enabled: got %v, want %v", got.Enabled, tc.policy.Enabled)
+			}
+			if got.RotationInterval != tc.policy.RotationInterval {
+				t.Errorf("RotationInterval: got %v, want %v", got.RotationInterval, tc.policy.RotationInterval)
+			}
+			if got.MaxKeyAge != tc.policy.MaxKeyAge {
+				t.Errorf("MaxKeyAge: got %v, want %v", got.MaxKeyAge, tc.policy.MaxKeyAge)
+			}
+			if got.KeepOldKeys != tc.policy.KeepOldKeys {
+				t.Errorf("KeepOldKeys: got %v, want %v", got.KeepOldKeys, tc.policy.KeepOldKeys)
+			}
+		})
 	}
 }
 
@@ -196,7 +262,7 @@ func TestGetOrCreateRoomKey_EmptyRoomID(t *testing.T) {
 	db := startMongoDB(t)
 	kek := newTestAEAD(t)
 
-	km, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db)
+	km, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db, zap.NewNop())
 	if err != nil {
 		t.Fatalf("create km: %v", err)
 	}
@@ -213,7 +279,7 @@ func TestGetOrCreateRoomKey_CreateAndIdempotent(t *testing.T) {
 	db := startMongoDB(t)
 	kek := newTestAEAD(t)
 
-	km, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db)
+	km, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db, zap.NewNop())
 	if err != nil {
 		t.Fatalf("create km: %v", err)
 	}
@@ -245,7 +311,7 @@ func TestEncryptDecryptRoundTrip_TinkFormat(t *testing.T) {
 	db := startMongoDB(t)
 	kek := newTestAEAD(t)
 
-	km1, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db)
+	km1, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db, zap.NewNop())
 	if err != nil {
 		t.Fatalf("create km1: %v", err)
 	}
@@ -258,7 +324,7 @@ func TestEncryptDecryptRoundTrip_TinkFormat(t *testing.T) {
 	}
 
 	// Create a second KeyManager sharing the same kek and DB — simulates restart.
-	km2, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db)
+	km2, err := keymanager.NewKeyManagerWithPersistence(kek, nil, db, zap.NewNop())
 	if err != nil {
 		t.Fatalf("create km2: %v", err)
 	}

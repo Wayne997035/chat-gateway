@@ -14,6 +14,7 @@ import (
 
 	"github.com/tink-crypto/tink-go/v2/tink"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.uber.org/zap"
 )
 
 const (
@@ -32,17 +33,25 @@ type KeyManagerWithPersistence struct {
 	rotationPolicy  RotationPolicy
 	stopChan        chan struct{}
 	running         bool
+	logger          *zap.Logger
 }
 
 // NewKeyManagerWithPersistence 創建帶持久化的密鑰管理器.
 // kek 是 Tink AEAD，用於新 tink: 格式的加密/解密。
 // legacyMasterKey 是 32-byte raw key，用於讀取舊 gcm: 格式（migration 前）；migration 完成後傳 nil。
-func NewKeyManagerWithPersistence(kek tink.AEAD, legacyMasterKey []byte, db *mongo.Database) (*KeyManagerWithPersistence, error) {
+// logger 是結構化日誌記錄器；傳 nil 時使用 zap.NewNop()。
+func NewKeyManagerWithPersistence(
+	kek tink.AEAD, legacyMasterKey []byte, db *mongo.Database, logger *zap.Logger,
+) (*KeyManagerWithPersistence, error) {
 	if kek == nil {
 		return nil, fmt.Errorf("kek AEAD must not be nil")
 	}
 	if legacyMasterKey != nil && len(legacyMasterKey) != 32 {
 		return nil, fmt.Errorf("legacy master key must be 32 bytes (256 bits)")
+	}
+
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 
 	// 防禦性複製 legacyMasterKey（安全增強：防止外部修改）
@@ -64,13 +73,23 @@ func NewKeyManagerWithPersistence(kek tink.AEAD, legacyMasterKey []byte, db *mon
 			MaxKeyAge:        30 * 24 * time.Hour,
 			KeepOldKeys:      5,
 		},
+		logger: logger,
 	}
 
 	// 啟動時清理過期密鑰
 	go func() {
-		count, err := km.store.DeleteExpiredKeys(context.Background())
-		if err == nil && count > 0 {
-			fmt.Printf("Cleaned up %d expired keys\n", count)
+		defer func() {
+			if r := recover(); r != nil {
+				km.logger.Error("key cleanup panicked", zap.Any("panic", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		count, err := km.store.DeleteExpiredKeys(ctx)
+		if err != nil {
+			km.logger.Error("key cleanup failed", zap.Error(err))
+		} else if count > 0 {
+			km.logger.Info("expired keys cleaned up", zap.Int64("count", count))
 		}
 	}()
 
@@ -227,10 +246,14 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	now := time.Now()
 	newVersion := oldKey.Version + 1
 
+	// 為緩存創建獨立的副本（避免被 defer 清零）
+	keyValueForCache := make([]byte, len(newKeyValue))
+	copy(keyValueForCache, newKeyValue)
+
 	// 創建新密鑰
 	newKey := &Key{
 		ID:        roomID,
-		Value:     newKeyValue,
+		Value:     keyValueForCache, // 使用副本，不會被清零
 		CreatedAt: oldKey.CreatedAt,
 		RotatedAt: now,
 		Version:   newVersion,
@@ -516,7 +539,16 @@ func (km *KeyManagerWithPersistence) SetRotationPolicy(policy RotationPolicy) {
 	km.rotationPolicy = policy
 }
 
+// GetRotationPolicy 返回當前密鑰輪換策略（用於驗證與測試）.
+func (km *KeyManagerWithPersistence) GetRotationPolicy() RotationPolicy {
+	km.mu.RLock()
+	defer km.mu.RUnlock()
+	return km.rotationPolicy
+}
+
 // StartAutoRotation 啟動自動密鑰輪換.
+// SetRotationPolicy must be called before StartAutoRotation.
+// Interval changes after start are ignored until process restart.
 func (km *KeyManagerWithPersistence) StartAutoRotation() {
 	km.mu.Lock()
 	defer km.mu.Unlock()
@@ -546,7 +578,15 @@ func (km *KeyManagerWithPersistence) StopAutoRotation() {
 
 // autoRotationLoop 自動輪換循環.
 func (km *KeyManagerWithPersistence) autoRotationLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
+	km.mu.RLock()
+	interval := km.rotationPolicy.RotationInterval
+	km.mu.RUnlock()
+
+	if interval <= 0 {
+		interval = 1 * time.Hour
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -574,9 +614,9 @@ func (km *KeyManagerWithPersistence) checkAndRotateKeys() {
 	// 輪換需要輪換的密鑰
 	for _, roomID := range keysToRotate {
 		if err := km.rotateKey(roomID); err != nil {
-			fmt.Printf("Failed to rotate key for room %s: %v\n", roomID, err)
+			km.logger.Error("key rotation failed", zap.String("room_id", roomID), zap.Error(err))
 		} else {
-			fmt.Printf("Successfully rotated key for room %s\n", roomID)
+			km.logger.Info("key rotated", zap.String("room_id", roomID))
 		}
 	}
 }

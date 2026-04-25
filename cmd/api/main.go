@@ -117,15 +117,22 @@ func mainNoExit() error {
 			return fmt.Errorf("database initialization failed")
 		}
 
-		keyManager, err = keymanager.NewKeyManagerWithPersistence(kekAEAD, legacyKey, mongoDB)
+		keyManager, err = keymanager.NewKeyManagerWithPersistence(kekAEAD, legacyKey, mongoDB, logger.L())
 		if err != nil {
 			logger.Error(ctx, "密鑰管理器創建失敗", logger.WithDetails(map[string]interface{}{"error": err.Error()}))
 			return fmt.Errorf("encryption initialization failed")
 		}
 
 		// 啟用自動密鑰輪換（可選）
-		if os.Getenv("KEY_ROTATION_ENABLED") == "true" {
+		if cfg.Security.KeyRotation.Enabled {
+			keyManager.SetRotationPolicy(keymanager.RotationPolicy{
+				Enabled:          true,
+				RotationInterval: time.Duration(cfg.Security.KeyRotation.RotationIntervalHours) * time.Hour,
+				MaxKeyAge:        time.Duration(cfg.Security.KeyRotation.MaxKeyAgeDays) * 24 * time.Hour,
+				KeepOldKeys:      cfg.Security.KeyRotation.KeepOldKeys,
+			})
 			keyManager.StartAutoRotation()
+			defer keyManager.StopAutoRotation()
 			logger.Info(ctx, "[KeyManager] 自動密鑰輪換已啟用")
 		}
 	}

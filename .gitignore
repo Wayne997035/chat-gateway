@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-api
-chat_gateway
+/api
+/chat_gateway
 # Test binary, built with `go test -c`
 *.test
 
