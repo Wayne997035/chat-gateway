@@ -16,12 +16,6 @@ import (
 
 // Start 啟動伺服器.
 func Start(repos *database.Repositories) error {
-	// 初始化日誌系統
-	if err := logger.InitLogger(); err != nil {
-		return err
-	}
-	defer logger.CloseLogger()
-
 	logger.LogInfof("正在啟動 ChatGateway API 伺服器...")
 
 	// 載入設定

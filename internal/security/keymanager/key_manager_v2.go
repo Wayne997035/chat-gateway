@@ -8,60 +8,96 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/tink-crypto/tink-go/v2/tink"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.uber.org/zap"
 )
 
-// KeyManagerWithPersistence 帶持久化的密鑰管理器
+const (
+	tinkEncryptedPrefix = "tink:"
+	gcmEncryptedPrefix  = "gcm:"
+)
+
+// KeyManagerWithPersistence 帶持久化的密鑰管理器.
 type KeyManagerWithPersistence struct {
-	mu             sync.RWMutex
-	keys           map[string]*Key   // roomID -> 當前密鑰（緩存）
-	oldKeys        map[string][]*Key // roomID -> 歷史密鑰（緩存）
-	masterKey      []byte            // 主密鑰（用於加密存儲的密鑰）
-	store          *KeyStore         // 持久化存儲
-	rotationPolicy RotationPolicy
-	stopChan       chan struct{}
-	running        bool
+	mu              sync.RWMutex
+	keys            map[string]*Key   // roomID -> 當前密鑰（緩存）
+	oldKeys         map[string][]*Key // roomID -> 歷史密鑰（緩存）
+	kek             tink.AEAD         // KEK AEAD（Tink，用於加密/解密 room key）
+	legacyMasterKey []byte            // 舊格式 gcm: 解密用（migration 完成後可為 nil）
+	store           *KeyStore         // 持久化存儲
+	rotationPolicy  RotationPolicy
+	stopChan        chan struct{}
+	running         bool
+	logger          *zap.Logger
 }
 
-// NewKeyManagerWithPersistence 創建帶持久化的密鑰管理器
-func NewKeyManagerWithPersistence(masterKey []byte, db *mongo.Database) (*KeyManagerWithPersistence, error) {
-	if len(masterKey) != 32 {
-		return nil, fmt.Errorf("master key must be 32 bytes (256 bits)")
+// NewKeyManagerWithPersistence 創建帶持久化的密鑰管理器.
+// kek 是 Tink AEAD，用於新 tink: 格式的加密/解密。
+// legacyMasterKey 是 32-byte raw key，用於讀取舊 gcm: 格式（migration 前）；migration 完成後傳 nil。
+// logger 是結構化日誌記錄器；傳 nil 時使用 zap.NewNop()。
+func NewKeyManagerWithPersistence(
+	kek tink.AEAD, legacyMasterKey []byte, db *mongo.Database, logger *zap.Logger,
+) (*KeyManagerWithPersistence, error) {
+	if kek == nil {
+		return nil, fmt.Errorf("kek AEAD must not be nil")
+	}
+	if legacyMasterKey != nil && len(legacyMasterKey) != 32 {
+		return nil, fmt.Errorf("legacy master key must be 32 bytes (256 bits)")
 	}
 
-	// 防禦性複製 Master Key（安全增強：防止外部修改）
-	masterKeyCopy := make([]byte, len(masterKey))
-	copy(masterKeyCopy, masterKey)
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	// 防禦性複製 legacyMasterKey（安全增強：防止外部修改）
+	var legacyCopy []byte
+	if legacyMasterKey != nil {
+		legacyCopy = make([]byte, len(legacyMasterKey))
+		copy(legacyCopy, legacyMasterKey)
+	}
 
 	km := &KeyManagerWithPersistence{
-		keys:      make(map[string]*Key),
-		oldKeys:   make(map[string][]*Key),
-		masterKey: masterKeyCopy,
-		store:     NewKeyStore(db),
+		keys:            make(map[string]*Key),
+		oldKeys:         make(map[string][]*Key),
+		kek:             kek,
+		legacyMasterKey: legacyCopy,
+		store:           NewKeyStore(db),
 		rotationPolicy: RotationPolicy{
 			Enabled:          false,
 			RotationInterval: 24 * time.Hour,
 			MaxKeyAge:        30 * 24 * time.Hour,
 			KeepOldKeys:      5,
 		},
+		logger: logger,
 	}
 
 	// 啟動時清理過期密鑰
 	go func() {
-		count, err := km.store.DeleteExpiredKeys(context.Background())
-		if err == nil && count > 0 {
-			fmt.Printf("Cleaned up %d expired keys\n", count)
+		defer func() {
+			if r := recover(); r != nil {
+				km.logger.Error("key cleanup panicked", zap.Any("panic", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		count, err := km.store.DeleteExpiredKeys(ctx)
+		if err != nil {
+			km.logger.Error("key cleanup failed", zap.Error(err))
+		} else if count > 0 {
+			km.logger.Info("expired keys cleaned up", zap.Int64("count", count))
 		}
 	}()
 
 	return km, nil
 }
 
-// GetOrCreateRoomKey 獲取或創建聊天室密鑰（帶 DB 持久化）
-// 使用 Double-Check Locking 防止並發創建
+// GetOrCreateRoomKey 獲取或創建聊天室密鑰（帶 DB 持久化）.
+// 使用 Double-Check Locking 防止並發創建.
 func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, error) {
 	if roomID == "" {
 		return nil, fmt.Errorf("roomID cannot be empty")
@@ -117,8 +153,8 @@ func (km *KeyManagerWithPersistence) GetOrCreateRoomKey(roomID string) ([]byte, 
 	return km.createRoomKeyUnsafe(roomID)
 }
 
-// createRoomKeyUnsafe 創建新的聊天室密鑰（不加鎖版本）
-// 調用者必須已經持有 km.mu 寫鎖
+// createRoomKeyUnsafe 創建新的聊天室密鑰（不加鎖版本）.
+// 調用者必須已經持有 km.mu 寫鎖.
 func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte, error) {
 	// 再次檢查（防止並發創建）
 	if key, exists := km.keys[roomID]; exists && key.Status == KeyStatusActive {
@@ -152,7 +188,7 @@ func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte,
 		Status:    KeyStatusActive,
 	}
 
-	// 用 Master Key 加密 Room Key
+	// 用 KEK 加密 Room Key
 	encryptedKey, err := km.encryptRoomKey(keyValue)
 	if err != nil {
 		return nil, fmt.Errorf("key encryption error")
@@ -184,7 +220,7 @@ func (km *KeyManagerWithPersistence) createRoomKeyUnsafe(roomID string) ([]byte,
 	return keyValueCopy, nil
 }
 
-// rotateKey 輪換密鑰（保存到 DB）
+// rotateKey 輪換密鑰（保存到 DB）.
 func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	km.mu.Lock()
 	defer km.mu.Unlock()
@@ -210,17 +246,21 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	now := time.Now()
 	newVersion := oldKey.Version + 1
 
+	// 為緩存創建獨立的副本（避免被 defer 清零）
+	keyValueForCache := make([]byte, len(newKeyValue))
+	copy(keyValueForCache, newKeyValue)
+
 	// 創建新密鑰
 	newKey := &Key{
 		ID:        roomID,
-		Value:     newKeyValue,
+		Value:     keyValueForCache, // 使用副本，不會被清零
 		CreatedAt: oldKey.CreatedAt,
 		RotatedAt: now,
 		Version:   newVersion,
 		Status:    KeyStatusActive,
 	}
 
-	// 用 Master Key 加密新的 Room Key
+	// 用 KEK 加密新的 Room Key
 	encryptedKey, err := km.encryptRoomKey(newKeyValue)
 	if err != nil {
 		return fmt.Errorf("key encryption error")
@@ -263,33 +303,46 @@ func (km *KeyManagerWithPersistence) rotateKey(roomID string) error {
 	return nil
 }
 
-// encryptRoomKey 用 Master Key 加密 Room Key
+// encryptRoomKey 用 Tink KEK 加密 Room Key，輸出格式：tink:<base64(ciphertext)>.
 func (km *KeyManagerWithPersistence) encryptRoomKey(roomKey []byte) (string, error) {
-	block, err := aes.NewCipher(km.masterKey)
+	ct, err := km.kek.Encrypt(roomKey, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
+		return "", fmt.Errorf("encrypt room key: %w", err)
 	}
 
-	// 生成隨機 IV
-	ciphertext := make([]byte, aes.BlockSize+len(roomKey))
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return "", fmt.Errorf("failed to generate IV: %w", err)
-	}
-
-	// 使用 CTR 模式加密
-	// #nosec G407 -- IV is dynamically generated from crypto/rand above, not hardcoded
-	stream := cipher.NewCTR(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], roomKey)
-
-	// Base64 編碼
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	return tinkEncryptedPrefix + base64.StdEncoding.EncodeToString(ct), nil
 }
 
-// decryptRoomKey 用 Master Key 解密 Room Key
+// decryptRoomKey 解密 Room Key，支援 tink: 新格式和 gcm: 舊格式（向後相容）.
 func (km *KeyManagerWithPersistence) decryptRoomKey(encryptedKey string) ([]byte, error) {
+	switch {
+	case strings.HasPrefix(encryptedKey, tinkEncryptedPrefix):
+		encoded := encryptedKey[len(tinkEncryptedPrefix):]
+		ct, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("decode tink ciphertext: %w", err)
+		}
+
+		return km.kek.Decrypt(ct, nil)
+
+	case strings.HasPrefix(encryptedKey, gcmEncryptedPrefix):
+		// 向後相容：gcm: 格式（migration 前還存在）
+		return km.decryptRoomKeyGCM(encryptedKey[len(gcmEncryptedPrefix):])
+
+	default:
+		return nil, fmt.Errorf("unsupported key format")
+	}
+}
+
+// decryptRoomKeyGCM 使用舊 MASTER_KEY（legacyMasterKey）解密 gcm: 格式的 Room Key.
+// 在 migration 完成後，此路徑不再需要。
+func (km *KeyManagerWithPersistence) decryptRoomKeyGCM(encoded string) ([]byte, error) {
+	if km.legacyMasterKey == nil {
+		return nil, fmt.Errorf("legacy master key not configured; cannot decrypt gcm: format")
+	}
+
 	// Base64 解碼
-	ciphertext, err := base64.StdEncoding.DecodeString(encryptedKey)
+	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("decryption error")
 	}
@@ -305,7 +358,7 @@ func (km *KeyManagerWithPersistence) decryptRoomKey(encryptedKey string) ([]byte
 		return nil, fmt.Errorf("invalid encrypted data")
 	}
 
-	block, err := aes.NewCipher(km.masterKey)
+	block, err := aes.NewCipher(km.legacyMasterKey)
 	if err != nil {
 		return nil, fmt.Errorf("decryption error")
 	}
@@ -323,7 +376,7 @@ func (km *KeyManagerWithPersistence) decryptRoomKey(encryptedKey string) ([]byte
 	return plaintext, nil
 }
 
-// LoadAllKeys 從數據庫加載所有密鑰（啟動時使用）
+// LoadAllKeys 從數據庫加載所有密鑰（啟動時使用）.
 func (km *KeyManagerWithPersistence) LoadAllKeys(ctx context.Context, roomID string) error {
 	// 獲取所有密鑰版本
 	keyDocs, err := km.store.GetAllKeys(ctx, roomID)
@@ -366,7 +419,7 @@ func (km *KeyManagerWithPersistence) LoadAllKeys(ctx context.Context, roomID str
 	return nil
 }
 
-// cleanupOldKeys 清理過舊的密鑰
+// cleanupOldKeys 清理過舊的密鑰.
 func (km *KeyManagerWithPersistence) cleanupOldKeys(roomID string) {
 	oldKeyList := km.oldKeys[roomID]
 	if len(oldKeyList) <= km.rotationPolicy.KeepOldKeys {
@@ -377,7 +430,7 @@ func (km *KeyManagerWithPersistence) cleanupOldKeys(roomID string) {
 	km.oldKeys[roomID] = oldKeyList[len(oldKeyList)-km.rotationPolicy.KeepOldKeys:]
 }
 
-// shouldRotateKey 判斷是否需要輪換密鑰
+// shouldRotateKey 判斷是否需要輪換密鑰.
 func (km *KeyManagerWithPersistence) shouldRotateKey(key *Key) bool {
 	if !km.rotationPolicy.Enabled {
 		return false
@@ -402,7 +455,64 @@ func (km *KeyManagerWithPersistence) shouldRotateKey(key *Key) bool {
 	return false
 }
 
-// GetKeyInfo 獲取密鑰信息（不返回密鑰值）
+// GetActiveKeyWithVersion 返回指定聊天室的當前密鑰值及版本號.
+// 若密鑰不存在則自動創建（與 GetOrCreateRoomKey 行為相同）。
+func (km *KeyManagerWithPersistence) GetActiveKeyWithVersion(roomID string) (keyBytes []byte, version int, err error) {
+	key, err := km.GetOrCreateRoomKey(roomID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	km.mu.RLock()
+	cachedKey, exists := km.keys[roomID]
+	km.mu.RUnlock()
+
+	version = 1
+	if exists {
+		version = cachedKey.Version
+	}
+
+	return key, version, nil
+}
+
+// GetKeyByVersion 根據版本號返回指定聊天室的密鑰值.
+// 先查緩存（活躍鍵 + 歷史鍵），找不到時從 DB 載入。
+func (km *KeyManagerWithPersistence) GetKeyByVersion(roomID string, version int) ([]byte, error) {
+	km.mu.RLock()
+	// 先查活躍鍵
+	if active, ok := km.keys[roomID]; ok && active.Version == version {
+		val := make([]byte, len(active.Value))
+		copy(val, active.Value)
+		km.mu.RUnlock()
+		return val, nil
+	}
+	// 再查歷史鍵緩存
+	for _, old := range km.oldKeys[roomID] {
+		if old.Version == version {
+			val := make([]byte, len(old.Value))
+			copy(val, old.Value)
+			km.mu.RUnlock()
+			return val, nil
+		}
+	}
+	km.mu.RUnlock()
+
+	// 緩存未命中，從 DB 載入
+	ctx := context.Background()
+	keyDoc, err := km.store.GetKeyByVersion(ctx, roomID, version)
+	if err != nil {
+		return nil, fmt.Errorf("key version %d not found for room %s: %w", version, roomID, err)
+	}
+
+	roomKey, err := km.decryptRoomKey(keyDoc.EncryptedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt key version %d: %w", version, err)
+	}
+
+	return roomKey, nil
+}
+
+// GetKeyInfo 獲取密鑰信息（不返回密鑰值）.
 func (km *KeyManagerWithPersistence) GetKeyInfo(roomID string) (*KeyInfo, error) {
 	km.mu.RLock()
 	defer km.mu.RUnlock()
@@ -422,14 +532,23 @@ func (km *KeyManagerWithPersistence) GetKeyInfo(roomID string) (*KeyInfo, error)
 	}, nil
 }
 
-// SetRotationPolicy 設置密鑰輪換策略
+// SetRotationPolicy 設置密鑰輪換策略.
 func (km *KeyManagerWithPersistence) SetRotationPolicy(policy RotationPolicy) {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 	km.rotationPolicy = policy
 }
 
-// StartAutoRotation 啟動自動密鑰輪換
+// GetRotationPolicy 返回當前密鑰輪換策略（用於驗證與測試）.
+func (km *KeyManagerWithPersistence) GetRotationPolicy() RotationPolicy {
+	km.mu.RLock()
+	defer km.mu.RUnlock()
+	return km.rotationPolicy
+}
+
+// StartAutoRotation 啟動自動密鑰輪換.
+// SetRotationPolicy must be called before StartAutoRotation.
+// Interval changes after start are ignored until process restart.
 func (km *KeyManagerWithPersistence) StartAutoRotation() {
 	km.mu.Lock()
 	defer km.mu.Unlock()
@@ -444,7 +563,7 @@ func (km *KeyManagerWithPersistence) StartAutoRotation() {
 	go km.autoRotationLoop()
 }
 
-// StopAutoRotation 停止自動密鑰輪換
+// StopAutoRotation 停止自動密鑰輪換.
 func (km *KeyManagerWithPersistence) StopAutoRotation() {
 	km.mu.Lock()
 	defer km.mu.Unlock()
@@ -457,9 +576,17 @@ func (km *KeyManagerWithPersistence) StopAutoRotation() {
 	km.running = false
 }
 
-// autoRotationLoop 自動輪換循環
+// autoRotationLoop 自動輪換循環.
 func (km *KeyManagerWithPersistence) autoRotationLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
+	km.mu.RLock()
+	interval := km.rotationPolicy.RotationInterval
+	km.mu.RUnlock()
+
+	if interval <= 0 {
+		interval = 1 * time.Hour
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -472,7 +599,7 @@ func (km *KeyManagerWithPersistence) autoRotationLoop() {
 	}
 }
 
-// checkAndRotateKeys 檢查並輪換需要輪換的密鑰
+// checkAndRotateKeys 檢查並輪換需要輪換的密鑰.
 func (km *KeyManagerWithPersistence) checkAndRotateKeys() {
 	km.mu.RLock()
 	keysToRotate := make([]string, 0)
@@ -487,14 +614,14 @@ func (km *KeyManagerWithPersistence) checkAndRotateKeys() {
 	// 輪換需要輪換的密鑰
 	for _, roomID := range keysToRotate {
 		if err := km.rotateKey(roomID); err != nil {
-			fmt.Printf("Failed to rotate key for room %s: %v\n", roomID, err)
+			km.logger.Error("key rotation failed", zap.String("room_id", roomID), zap.Error(err))
 		} else {
-			fmt.Printf("Successfully rotated key for room %s\n", roomID)
+			km.logger.Info("key rotated", zap.String("room_id", roomID))
 		}
 	}
 }
 
-// ForceRotateKey 強制輪換指定聊天室的密鑰
+// ForceRotateKey 強制輪換指定聊天室的密鑰.
 func (km *KeyManagerWithPersistence) ForceRotateKey(roomID string) error {
 	km.mu.RLock()
 	_, exists := km.keys[roomID]
@@ -507,7 +634,7 @@ func (km *KeyManagerWithPersistence) ForceRotateKey(roomID string) error {
 	return km.rotateKey(roomID)
 }
 
-// Stats 獲取統計信息
+// Stats 獲取統計信息.
 func (km *KeyManagerWithPersistence) Stats() KeyManagerStats {
 	km.mu.RLock()
 	defer km.mu.RUnlock()
@@ -533,4 +660,70 @@ func (km *KeyManagerWithPersistence) Stats() KeyManagerStats {
 	}
 
 	return stats
+}
+
+// DecryptGCMLegacy decrypts a base64-encoded AES-CTR ciphertext produced by the
+// legacy MASTER_KEY scheme (gcm: prefix format, without the prefix).
+// This is exported solely for use by the rekey migration command.
+func DecryptGCMLegacy(masterKey []byte, encoded string) ([]byte, error) {
+	if len(masterKey) != 32 {
+		return nil, fmt.Errorf("master key must be 32 bytes")
+	}
+
+	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+
+	defer func() {
+		for i := range ciphertext {
+			ciphertext[i] = 0
+		}
+	}()
+
+	if len(ciphertext) < aes.BlockSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+
+	block, err := aes.NewCipher(masterKey)
+	if err != nil {
+		return nil, fmt.Errorf("create cipher: %w", err)
+	}
+
+	iv := ciphertext[:aes.BlockSize]
+	encryptedData := ciphertext[aes.BlockSize:]
+
+	// #nosec G407 -- IV is extracted from encrypted data, not hardcoded
+	stream := cipher.NewCTR(block, iv)
+	plaintext := make([]byte, len(encryptedData))
+	stream.XORKeyStream(plaintext, encryptedData)
+
+	return plaintext, nil
+}
+
+// EncryptRoomKeyWithLegacy encrypts a room key using the legacy CTR method
+// for testing/migration purposes only.
+// This is exported solely for use by the rekey migration command.
+func EncryptRoomKeyWithLegacy(masterKey, roomKey []byte) (string, error) {
+	if len(masterKey) != 32 {
+		return "", fmt.Errorf("master key must be 32 bytes")
+	}
+
+	block, err := aes.NewCipher(masterKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	ciphertext := make([]byte, aes.BlockSize+len(roomKey))
+	iv := ciphertext[:aes.BlockSize]
+
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", fmt.Errorf("failed to generate IV: %w", err)
+	}
+
+	// #nosec G407 -- IV is dynamically generated from crypto/rand above, not hardcoded
+	stream := cipher.NewCTR(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], roomKey)
+
+	return gcmEncryptedPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
 }

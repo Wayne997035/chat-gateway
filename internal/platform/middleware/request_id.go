@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 const (
@@ -10,32 +9,17 @@ const (
 	RequestIDKey    = "request_id"
 )
 
-// RequestIDMiddleware 為每個請求生成唯一 ID
+// RequestIDMiddleware delegates to TraceMiddleware so trace_id and
+// X-Request-ID are both set consistently.
 func RequestIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 優先使用客戶端提供的 Request ID（如果有的話）
-		requestID := c.GetHeader(RequestIDHeader)
-
-		// 如果客戶端沒有提供，生成新的 UUID
-		if requestID == "" {
-			requestID = uuid.New().String()
-		}
-
-		// 將 Request ID 設置到 context
-		c.Set(RequestIDKey, requestID)
-
-		// 將 Request ID 添加到響應頭
-		c.Header(RequestIDHeader, requestID)
-
-		c.Next()
-	}
+	return TraceMiddleware()
 }
 
-// GetRequestID 從 context 獲取 Request ID
+// GetRequestID returns the trace_id stored in the gin context.
 func GetRequestID(c *gin.Context) string {
-	if requestID, exists := c.Get(RequestIDKey); exists {
-		if id, ok := requestID.(string); ok {
-			return id
+	if id, exists := c.Get("trace_id"); exists {
+		if s, ok := id.(string); ok {
+			return s
 		}
 	}
 	return ""

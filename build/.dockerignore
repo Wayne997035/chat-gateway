@@ -1,0 +1,18 @@
+# Non-production configs contain credentials — supply production config at runtime
+configs/local.yaml
+configs/local.yml
+configs/development.yaml
+configs/staging.yaml
+.env
+.env.*
+*.env
+
+# Development artifacts
+.air.toml
+cmd/checkkeys/
+.claude/
+*.test
+
+# Git metadata
+.git
+.gitignore

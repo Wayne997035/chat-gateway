@@ -1,0 +1,5 @@
+configs/local.yaml
+configs/*.local.yaml
+.env
+.env.*
+.claude/

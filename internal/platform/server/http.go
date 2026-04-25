@@ -1,18 +1,22 @@
 package server
 
 import (
-	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"chat-gateway/internal/grpcclient"
 	"chat-gateway/internal/httputil"
 	"chat-gateway/internal/platform/config"
 	"chat-gateway/internal/platform/health"
+	"chat-gateway/internal/platform/logger"
 	"chat-gateway/internal/platform/middleware"
 	"chat-gateway/proto/chat"
 
+	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // securityHeadersMiddleware 添加安全標頭
@@ -45,9 +49,18 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// Router 設定路由 - 簡化版本，只保留健康檢查
+// Router 設定路由.
 func Router() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+
+	// Structured request logging — skip /health to reduce noise.
+	r.Use(ginzap.GinzapWithConfig(logger.L(), &ginzap.Config{
+		UTC:       true,
+		SkipPaths: []string{"/health"},
+	}))
+
+	// Panic recovery with structured zap log.
+	r.Use(ginzap.RecoveryWithZap(logger.L(), true))
 
 	setupMiddleware(r)
 
@@ -98,7 +111,7 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, traceparent")
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
@@ -161,7 +174,7 @@ func setupSSELimiter() *middleware.SSEConnectionLimiter {
 	)
 }
 
-// registerRoutes 註冊所有路由
+// registerRoutes 註冊所有路由.
 func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter) {
 	healthHandler := health.NewHealthHandler()
 	r.GET("/health", healthHandler.HealthCheck)
@@ -175,6 +188,9 @@ func registerRoutes(r *gin.Engine, sseLimiter *middleware.SSEConnectionLimiter) 
 	r.POST("/api/v1/messages/read", markAsRead)
 
 	r.GET("/api/v1/messages/stream", sseLimiter.Middleware(), streamMessages)
+
+	// Debug endpoint — runtime log level adjustment (no auth, internal use only).
+	r.PUT("/debug/log-level", handleSetLogLevel)
 }
 
 // 創建聊天室
@@ -251,7 +267,7 @@ func createRoom(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.CreateRoom(context.Background(), grpcReq)
+	resp, err := client.CreateRoom(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
@@ -303,40 +319,49 @@ func listUserRooms(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.ListUserRooms(context.Background(), grpcReq)
+	resp, err := client.ListUserRooms(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
 	}
 	messageClient := chat.NewChatRoomServiceClient(conn)
+	reqCtx := c.Request.Context()
 
-	// 轉換響應，包含最後訊息和未讀數量
+	// 轉換響應，包含最後訊息和未讀數量（並發獲取各房間未讀數量）
 	rooms := make([]map[string]interface{}, len(resp.Rooms))
+	var wg sync.WaitGroup
 	for i, room := range resp.Rooms {
-		// 獲取未讀數量
-		unreadResp, _ := messageClient.GetUnreadCount(context.Background(), &chat.GetUnreadCountRequest{
-			UserId: userID,
-			RoomId: room.Id,
-		})
-
-		unreadCount := int32(0)
-		if unreadResp != nil && unreadResp.Success {
-			unreadCount = unreadResp.Count
-		}
-
-		rooms[i] = map[string]interface{}{
-			"id":                room.Id,
-			"name":              room.Name,
-			"type":              room.Type,
-			"owner_id":          room.OwnerId,
-			"created_at":        room.CreatedAt,
-			"updated_at":        room.UpdatedAt,
-			"members":           room.Members,
-			"last_message":      room.LastMessage,
-			"last_message_time": room.LastMessageTime,
-			"unread_count":      unreadCount,
-		}
+		wg.Add(1)
+		go func(idx int, r *chat.ChatRoom) {
+			defer wg.Done()
+			unreadResp, unreadErr := messageClient.GetUnreadCount(reqCtx, &chat.GetUnreadCountRequest{
+				UserId: userID,
+				RoomId: r.Id,
+			})
+			if unreadErr != nil {
+				logger.L().Warn("failed to get unread count",
+					zap.String("room_id", r.Id),
+					zap.Error(unreadErr))
+			}
+			unreadCount := int32(0)
+			if unreadResp != nil && unreadResp.Success {
+				unreadCount = unreadResp.Count
+			}
+			rooms[idx] = map[string]interface{}{
+				"id":                r.Id,
+				"name":              r.Name,
+				"type":              r.Type,
+				"owner_id":          r.OwnerId,
+				"created_at":        r.CreatedAt,
+				"updated_at":        r.UpdatedAt,
+				"members":           r.Members,
+				"last_message":      r.LastMessage,
+				"last_message_time": r.LastMessageTime,
+				"unread_count":      unreadCount,
+			}
+		}(i, room)
 	}
+	wg.Wait()
 
 	c.JSON(200, gin.H{
 		"success":  resp.Success,
@@ -395,7 +420,7 @@ func sendMessage(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.SendMessage(context.Background(), grpcReq)
+	resp, err := client.SendMessage(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
@@ -466,7 +491,7 @@ func getMessages(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.GetMessages(context.Background(), grpcReq)
+	resp, err := client.GetMessages(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
@@ -508,7 +533,7 @@ func markAsRead(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.MarkAsRead(context.Background(), grpcReq)
+	resp, err := client.MarkAsRead(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
@@ -546,7 +571,7 @@ func addRoomMember(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.JoinRoom(context.Background(), grpcReq)
+	resp, err := client.JoinRoom(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
@@ -556,6 +581,26 @@ func addRoomMember(c *gin.Context) {
 		"success": resp.Success,
 		"message": resp.Message,
 	})
+}
+
+// handleSetLogLevel adjusts the global log level at runtime.
+// PUT /debug/log-level  body: {"level":"debug"}
+func handleSetLogLevel(c *gin.Context) {
+	var req struct {
+		Level string `json:"level"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(req.Level)); err != nil {
+		c.JSON(400, gin.H{"error": "invalid level: must be one of debug, info, warn, error"})
+		return
+	}
+	logger.SetLevel(level)
+	logger.L().Info("log level changed", zap.String("level", req.Level))
+	c.JSON(200, gin.H{"level": req.Level})
 }
 
 // 移除群組成員
@@ -576,7 +621,7 @@ func removeRoomMember(c *gin.Context) {
 	}
 
 	client := chat.NewChatRoomServiceClient(conn)
-	resp, err := client.LeaveRoom(context.Background(), grpcReq)
+	resp, err := client.LeaveRoom(c.Request.Context(), grpcReq)
 	if err != nil {
 		httputil.InternalServerError(c, err)
 		return
