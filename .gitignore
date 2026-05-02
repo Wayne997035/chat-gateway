@@ -69,4 +69,7 @@ dist/
 # Air temp files
 tmp/
 
+# Local AI guidance (not for public docs)
+/CLAUDE.md
+
 # Docker
